@@ -1,0 +1,178 @@
+# Dovecot 2.3 — TMAIL. ${MAIL_DOMAIN} is filled in by entrypoint.sh.
+protocols = imap pop3 lmtp sieve
+# Sieve vacation (auto-reply) and redirect send through Postfix on this host.
+submission_host = 127.0.0.1:25
+listen = *, ::
+
+log_path = /dev/stderr
+info_log_path = /dev/stdout
+auth_verbose = yes
+
+# --- Authentication ---
+auth_mechanisms = plain login
+auth_username_format = %Lu
+disable_plaintext_auth = yes
+auth_failure_delay = 2 secs
+# Backend logs in as "user@domain*zmail-app" to open any mailbox it is allowed to.
+auth_master_user_separator = *
+
+passdb {
+  driver = passwd-file
+  args = scheme=BLF-CRYPT /etc/dovecot/master-users
+  master = yes
+  result_success = continue
+}
+passdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+userdb {
+  driver = prefetch
+}
+userdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+
+# --- TLS ---
+ssl = required
+ssl_cert = </etc/zmail/tls/fullchain.pem
+ssl_key = </etc/zmail/tls/privkey.pem
+ssl_dh = </usr/share/dovecot/dh.pem
+ssl_min_protocol = TLSv1.2
+ssl_prefer_server_ciphers = yes
+
+# --- Storage ---
+mail_uid = vmail
+mail_gid = vmail
+first_valid_uid = 5000
+last_valid_uid = 5000
+mail_location = maildir:~/Maildir
+mail_plugins = $mail_plugins quota fts fts_xapian
+recipient_delimiter = +
+lda_mailbox_autocreate = yes
+lda_mailbox_autosubscribe = yes
+
+namespace inbox {
+  inbox = yes
+  separator = /
+  mailbox Drafts {
+    special_use = \Drafts
+    auto = subscribe
+  }
+  mailbox Sent {
+    special_use = \Sent
+    auto = subscribe
+  }
+  mailbox Junk {
+    special_use = \Junk
+    auto = subscribe
+    autoexpunge = 30d
+  }
+  mailbox Trash {
+    special_use = \Trash
+    auto = subscribe
+    autoexpunge = 30d
+  }
+  mailbox Archive {
+    special_use = \Archive
+    auto = subscribe
+  }
+}
+
+# --- Services ---
+service auth {
+  # SASL for Postfix submission
+  inet_listener {
+    address = 127.0.0.1
+    port = 12345
+  }
+  unix_listener auth-userdb {
+    mode = 0600
+    user = vmail
+  }
+}
+service lmtp {
+  inet_listener lmtp {
+    address = 127.0.0.1
+    port = 24
+  }
+}
+service imap-login {
+  inet_listener imap {
+    port = 143
+  }
+  inet_listener imaps {
+    port = 993
+    ssl = yes
+  }
+}
+service pop3-login {
+  inet_listener pop3 {
+    port = 0
+  }
+  inet_listener pop3s {
+    port = 995
+    ssl = yes
+  }
+}
+# doveadm HTTP API for the webmail backend (quota usage); loopback only
+doveadm_api_key = ${DOVEADM_API_KEY}
+service doveadm {
+  inet_listener http {
+    address = 127.0.0.1
+    port = 8080
+  }
+}
+service managesieve-login {
+  inet_listener sieve {
+    port = 4190
+  }
+}
+
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
+  postmaster_address = postmaster@${MAIL_DOMAIN}
+}
+protocol imap {
+  mail_plugins = $mail_plugins imap_quota
+  mail_max_userip_connections = 50
+}
+protocol pop3 {
+  pop3_uidl_format = %08Xu%08Xv
+}
+
+plugin {
+  quota = count:User quota
+  quota_vsizes = yes
+  quota_rule = *:storage=5G
+  quota_grace = 10%%
+  quota_exceeded_message = 552 5.2.2 Mailbox is full
+  sieve = file:~/sieve;active=~/.dovecot.sieve
+  # Global rules run before each user's own filters: spam goes to Junk.
+  sieve_before = /etc/dovecot/sieve/before.d
+
+  # Full-text search index (Xapian): searching a big mailbox reads the index, not every letter.
+  # partial=3: "inv" finds "invoice", "invoices"; new letters are indexed as they arrive.
+  fts = xapian
+  fts_xapian = partial=3 full=20 verbose=0 lowmemory=256
+  fts_autoindex = yes
+  # Attachments (PDF, Word, Excel, OpenDocument, RTF, CSV) go into the index as text.
+  fts_decoder = decode2text
+  fts_autoindex_exclude = \Trash
+  fts_autoindex_exclude2 = \Junk
+}
+
+service decode2text {
+  executable = script /usr/local/bin/decode2text.sh
+  user = dovecot
+  unix_listener decode2text {
+    mode = 0666
+  }
+}
+
+# Indexing runs in the background, one worker, so it never takes the server's memory.
+service indexer-worker {
+  process_limit = 1
+  vsz_limit = 1G
+}

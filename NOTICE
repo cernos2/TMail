@@ -1,0 +1,16 @@
+TMail — self-hosted mail server and webmail
+Copyright (C) 2026 TMail authors
+Repository: https://github.com/cernos2/TMail
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License version 3 as published by the Free Software Foundation (see LICENSE),
+with the following additional term under section 7(b) of that license:
+
+  Attribution. Every copy and every modified version of this program that offers its interface to
+  users (including over a network) must keep the attribution "TMail" with a working link to the
+  repository above visible in that interface — on the sign-in page and in the application's
+  settings or about section — in a form at least as noticeable as in the original program.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+General Public License for more details.

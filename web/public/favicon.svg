@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="268 200 352 278" aria-label="TMAIL">
+  <defs>
+    <linearGradient id="tm-wing" x1="483" y1="350" x2="617" y2="215" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#01829A"/>
+      <stop offset="1" stop-color="#015A72"/>
+    </linearGradient>
+  </defs>
+  <path d="M272 205H582L446 292H367Q345 292 332 278Z" fill="#01CCCC"/>
+  <path d="M483 268L580 205C602 199 620 220 617 246C615 266 606 281 593 289L483 350Z" fill="url(#tm-wing)"/>
+  <path d="M483 268V421Q483 433 471 439L411 471Q401 477 394 472Q388 468 388 459V356Q388 326 415 312Z" fill="#01475F"/>
+</svg>

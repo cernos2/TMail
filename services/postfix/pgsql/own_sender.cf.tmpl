@@ -1,0 +1,5 @@
+hosts = 127.0.0.1
+user = mta_ro
+password = ${MTA_DB_PASSWORD}
+dbname = zmail
+query = SELECT 'REJECT 5.7.1 Mail from our own domain must be sent with a login (port 587)' FROM mta.domains WHERE name = '%s'

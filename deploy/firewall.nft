@@ -1,0 +1,20 @@
+#!/usr/sbin/nft -f
+# TMAIL host firewall. Only public mail/web ports are open; everything else
+# (Postgres, Redis, Garage, Rspamd, doveadm, ManageSieve…) is loopback-only anyway,
+# this is the second line of defence. Docker keeps its own tables untouched.
+table inet tmail_fw
+delete table inet tmail_fw
+table inet tmail_fw {
+  set ssh_meter { type ipv4_addr; flags dynamic, timeout; timeout 1m; }
+  chain input {
+    type filter hook input priority filter; policy drop;
+    iif "lo" accept
+    ct state established,related accept
+    ct state invalid drop
+    meta l4proto { icmp, ipv6-icmp } limit rate 20/second accept
+    # SSH: at most 10 new connections per minute per IP (fail2ban bans on top).
+    tcp dport 22 ct state new add @ssh_meter { ip saddr limit rate 10/minute } accept
+    meta nfproto ipv6 tcp dport 22 ct state new accept
+    tcp dport { 25, 80, 443, 465, 587, 143, 993, 995 } accept
+  }
+}

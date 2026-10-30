@@ -1,0 +1,10 @@
+[Unit]
+Description=TMAIL backup (deploy/backup.sh, restic: 7 daily, 4 weekly, 3 monthly)
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/zmail
+ExecStart=/opt/zmail/deploy/backup.sh
+StandardOutput=append:/var/log/tmail-backup.log
+StandardError=append:/var/log/tmail-backup.log

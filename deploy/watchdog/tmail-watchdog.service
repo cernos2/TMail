@@ -1,0 +1,8 @@
+[Unit]
+Description=TMAIL watchdog: check every part and restart what fails
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tmail-watchdog.sh
+TimeoutStartSec=600

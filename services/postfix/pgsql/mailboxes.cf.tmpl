@@ -1,0 +1,5 @@
+hosts = 127.0.0.1
+user = mta_ro
+password = ${MTA_DB_PASSWORD}
+dbname = zmail
+query = SELECT 1 FROM mta.mailboxes WHERE address = '%s'

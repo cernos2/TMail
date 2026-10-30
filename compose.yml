@@ -1,0 +1,217 @@
+# TMAIL — mail core.
+# All services use the host network: Postfix/Dovecot see real client IPs (needed for spam checks),
+# internal services listen on 127.0.0.1 only. Secrets come from .env (see .env.example).
+name: zmail
+
+x-logging: &logging
+  driver: journald
+  options:
+    tag: "zmail-{{.Name}}"
+
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zmail
+      POSTGRES_USER: zmail
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?}
+      MTA_DB_PASSWORD: ${MTA_DB_PASSWORD:?}
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "shared_buffers=64MB", "-c", "max_connections=60"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./services/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "zmail", "-d", "zmail"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7.4.11-alpine
+    network_mode: host
+    restart: unless-stopped
+    command: ["redis-server", "--bind", "127.0.0.1", "--port", "6379", "--save", "300", "1", "--appendonly", "no"]
+    volumes:
+      - redisdata:/data
+    logging: *logging
+
+  unbound:
+    build: ./services/unbound
+    network_mode: host
+    restart: unless-stopped
+    logging: *logging
+
+  rspamd:
+    build: ./services/rspamd
+    network_mode: host
+    restart: unless-stopped
+    depends_on: [redis, unbound]
+    volumes:
+      - rspamddata:/var/lib/rspamd
+      - dkim:/var/lib/rspamd/dkim
+    logging: *logging
+
+  certs:
+    build: ./services/certs
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:?}
+      EXTRA_DOMAINS: ${FILES_HOSTNAME:-}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - tls:/tls
+      - acme:/acme
+    logging: *logging
+
+  # Webmail backend + Nuxt frontend (HTTPS on 443, ACME challenges and redirect on 80)
+  web:
+    build: ./backend
+    network_mode: host
+    restart: unless-stopped
+    # A hostile attachment must not take the whole server down with it.
+    mem_limit: 600m
+    depends_on:
+      postgres: {condition: service_healthy}
+      dovecot: {condition: service_started}
+      postfix: {condition: service_started}
+    environment:
+      GOMEMLIMIT: 450MiB
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:?}
+      ZMAIL_DB_URL: postgres://zmail:${DB_PASSWORD:?}@127.0.0.1:5432/zmail?sslmode=disable
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD:?}
+      DOVEADM_API_KEY: ${DOVEADM_API_KEY:?}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-z2026}
+      LOGGI_API_URL: ${LOGGI_API_URL:-}
+      LOGGI_API_KEY: ${LOGGI_API_KEY:-}
+      AI_API_URL: ${AI_API_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      DEFAULT_LANG: ${DEFAULT_LANG:-en}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-UTC}
+      COUNTRY: ${COUNTRY:-}
+      ORG_NAME: ${ORG_NAME:-}
+      SEARCH_LANGUAGE: ${SEARCH_LANGUAGE:-}
+      FILES_HOSTNAME: ${FILES_HOSTNAME:-}
+      PREVIEW_CACHE_DIR: /var/cache/tmail
+      S3_ENDPOINT: 127.0.0.1:3900
+      S3_BUCKET: tmail-files
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+    volumes:
+      - tls:/tls:ro
+      - acme:/acme:ro
+      - ./web/dist:/srv/web:ro
+      - dkim:/dkim
+      - postfixspool:/postfix-spool:ro
+      - previewsock:/run/preview
+      - previewcache:/var/cache/tmail
+      - ./import:/import:ro # Google Takeout archives to import (admin → import-mbox)
+    logging: *logging
+
+  # S3 storage (Garage) for large files sent as links. Localhost only; TMAIL serves the links.
+  # Antivirus: clamd on 127.0.0.1:3310 + freshclam updating the signatures every 4 hours.
+  clamav:
+    image: clamav/clamav-debian:1.5.4
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - clamdb:/var/lib/clamav
+      - ./services/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - ./services/clamav/freshclam.conf:/etc/clamav/freshclam.conf:ro
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 15m
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?}
+    volumes:
+      - ./services/garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    logging: *logging
+
+  # Office documents → PDF for attachment preview. No network at all; talks over a unix socket.
+  preview:
+    init: true # reaps the LibreOffice processes it kills (without it they piled up until "Cannot fork")
+    build: ./services/preview
+    network_mode: none
+    restart: unless-stopped
+    mem_limit: 900m
+    volumes:
+      - previewsock:/run/preview
+    logging: *logging
+
+  dovecot:
+    build: ./services/dovecot
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      MAIL_DOMAIN: ${MAIL_DOMAIN:?}
+      MTA_DB_PASSWORD: ${MTA_DB_PASSWORD:?}
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD:?}
+      DOVEADM_API_KEY: ${DOVEADM_API_KEY:?}
+    volumes:
+      - tls:/etc/zmail/tls:ro
+      - vmail:/var/vmail
+    logging: *logging
+
+  postfix:
+    build: ./services/postfix
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+      dovecot: {condition: service_started}
+      rspamd: {condition: service_started}
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:?}
+      MTA_DB_PASSWORD: ${MTA_DB_PASSWORD:?}
+    volumes:
+      - tls:/etc/zmail/tls:ro
+      - postfixspool:/var/spool/postfix
+    logging: *logging
+
+  # Admin CLI: docker compose run --rm ctl <command>
+  ctl:
+    build: ./ctl
+    network_mode: host
+    profiles: ["tools"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      ZMAIL_DB_URL: postgres://zmail:${DB_PASSWORD:?}@127.0.0.1:5432/zmail?sslmode=disable
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:?}
+      DKIM_DIR: /dkim
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-z2026}
+    volumes:
+      - dkim:/dkim
+
+volumes:
+  pgdata:
+  redisdata:
+  rspamddata:
+  dkim:
+  letsencrypt:
+  tls:
+  acme:
+  previewsock:
+  previewcache:
+  garage-meta:
+  garage-data:
+  vmail:
+  postfixspool:
+  clamdb:

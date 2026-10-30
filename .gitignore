@@ -1,0 +1,15 @@
+# Secrets and keys of an installation
+.env
+*.key
+*.pem
+# Built and downloaded files
+node_modules/
+web/.output/
+web/.nuxt/
+web/dist/
+backend/zmaild
+backend/cmd/zmaild/zmaild
+*.tgz
+# Notes of one installation
+dns-records.md
+reference/

@@ -1,0 +1,13 @@
+driver = pgsql
+connect = host=127.0.0.1 dbname=zmail user=mta_ro password=${MTA_DB_PASSWORD}
+default_pass_scheme = BLF-CRYPT
+
+password_query = SELECT address AS user, password_hash AS password, \
+  home AS userdb_home, 5000 AS userdb_uid, 5000 AS userdb_gid, \
+  '*:bytes=' || quota_bytes AS userdb_quota_rule \
+  FROM mta.users WHERE address = '%u'
+
+user_query = SELECT home, 5000 AS uid, 5000 AS gid, '*:bytes=' || quota_bytes AS quota_rule \
+  FROM mta.users WHERE address = '%u'
+
+iterate_query = SELECT address AS user FROM mta.users
