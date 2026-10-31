@@ -71,25 +71,15 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Sess
 			terms = append(terms, headerCrit("In-Reply-To", m.MessageID))
 		}
 		base := baseSubject(m.Subject)
-		if len([]rune(base)) >= 3 {
-			c := imap.NewSearchCriteria()
-			c.Header.Add("Subject", base)
-			terms = append(terms, c)
-		}
 		crit := orAll(terms)
-		mine := participants(m)
-		// Subject matches count only when they share a correspondent with this letter.
+		// Like Gmail: a letter belongs to the conversation when it refers to one of its letters AND
+		// has the same subject without Re:/Fwd: — the subject alone never joins, a new one splits.
 		related := func(x Summary) bool {
-			for _, id := range append([]string{x.MessageID, x.InReplyTo}, x.References...) {
-				if id != "" && (ids[id] || id == root || id == m.MessageID) {
-					return true
-				}
-			}
-			if base == "" || baseSubject(x.Subject) != base {
+			if baseSubject(x.Subject) != base {
 				return false
 			}
-			for e := range participants(x) {
-				if mine[e] {
+			for _, id := range append([]string{x.MessageID, x.InReplyTo}, x.References...) {
+				if id != "" && (ids[id] || id == root || id == m.MessageID) {
 					return true
 				}
 			}
@@ -166,21 +156,12 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Sess
 }
 
 // Reply and forward prefixes in several languages, Russian included: detection data.
-var reSubjPrefix = regexp.MustCompile(`(?i)^\s*((re|fwd?|aw|wg|отв|пересл|ответ)(\[\d+\])?\s*:\s*)+`)
+// Spam tags put before the subject by other servers ("***SPAM*** Re: Order") count as prefixes too.
+var reSubjPrefix = regexp.MustCompile(`(?i)^\s*(((re|fwd?|aw|wg|отв|пересл|ответ)(\[\d+\])?\s*:|\*+\s*spam\s*\*+|\[spam\])\s*)+`)
 
 // baseSubject is the subject without Re:/Fwd: prefixes, lower-cased, with spaces collapsed.
 func baseSubject(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(reSubjPrefix.ReplaceAllString(s, "")), " "))
-}
-
-func participants(m Summary) map[string]bool {
-	out := map[string]bool{}
-	for _, a := range append(append([]Addr{m.From}, m.To...), m.Cc...) {
-		if e := strings.ToLower(a.Email); e != "" && e != strings.ToLower(m.Account) {
-			out[e] = true
-		}
-	}
-	return out
 }
 
 func headerCrit(k, v string) *imap.SearchCriteria {

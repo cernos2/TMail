@@ -464,7 +464,7 @@ svg.i{width:18px;height:18px;flex:none}
 .period .err{font-size:12px;color:var(--danger);margin:0}
 .pp-foot{display:flex;gap:8px;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 10px 10px}
 .pp-foot .btn.primary{flex:1}
-.toasts{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;z-index:90;pointer-events:none;width:max-content;max-width:calc(100% - 32px)}
+.toasts{position:fixed;left:calc(16px + env(safe-area-inset-left,0px));bottom:calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;align-items:flex-start;z-index:90;pointer-events:none;width:max-content;max-width:min(420px,calc(100% - 32px))}
 .toast{background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:5px;font-size:13.5px;box-shadow:var(--shadow);pointer-events:auto;display:flex;gap:10px;align-items:center}
 .toast.err{background:var(--danger);color:#fff}
 .toast .link{color:inherit}

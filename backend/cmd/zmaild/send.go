@@ -481,7 +481,7 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request, sess *S
 	set := new(imap.SeqSet)
 	set.AddNum(uid)
 	if m, err := fetchOne(c, set, []imap.FetchItem{imap.FetchUid, imap.FetchBodyStructure}); err == nil && m != nil {
-		atts = attachmentsOf(m.BodyStructure)
+		atts = fileAttachments(attachmentsOf(m.BodyStructure))
 	}
 	// Remove the previous version (it may live in another mailbox if the sender was changed).
 	if in.draftUID > 0 && !(in.draftAccount == in.acc.Address && in.draftUID == uid) {

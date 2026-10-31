@@ -31,6 +31,9 @@ type Attachment struct {
 	Inline  bool   `json:"inline"`         // can be shown in the browser (images, PDF)
 	Preview string `json:"preview"`        // image | pdf | text | sheet | office | ""
 	Risk    string `json:"risk,omitempty"` // exec | macro | html: ask before downloading
+	// Embedded: an image shown in the letter's text (by Content-ID). Listed like in Gmail, but not
+	// carried into a draft or a forward as a separate file: the text holds it already.
+	Embedded bool `json:"embedded,omitempty"`
 }
 
 type FullMessage struct {
@@ -226,7 +229,8 @@ func attachmentsOf(bs *imap.BodyStructure) []Attachment {
 		if len(p) == 0 || len(part.Parts) > 0 && !strings.EqualFold(part.MIMEType, "message") {
 			return true
 		}
-		if !isAttachmentPart(part) {
+		embedded := part.Id != "" && strings.EqualFold(part.MIMEType, "image") && !isAttachmentPart(part)
+		if !isAttachmentPart(part) && !embedded {
 			return true
 		}
 		name := partFilename(part)
@@ -240,9 +244,20 @@ func attachmentsOf(bs *imap.BodyStructure) []Attachment {
 				name = "message.eml"
 			}
 		}
-		out = append(out, Attachment{Part: pathString(p), Name: name, Mime: mt, Size: decodedSize(part), Inline: inlineSafe(mt), Preview: previewKind(mt, name), Risk: attachmentRisk(name)})
+		out = append(out, Attachment{Part: pathString(p), Name: name, Mime: mt, Size: decodedSize(part), Inline: inlineSafe(mt), Preview: previewKind(mt, name), Risk: attachmentRisk(name), Embedded: embedded})
 		return !strings.EqualFold(part.MIMEType, "message")
 	})
+	return out
+}
+
+// fileAttachments: the attachments without the images embedded in the text.
+func fileAttachments(atts []Attachment) []Attachment {
+	out := atts[:0:0]
+	for _, a := range atts {
+		if !a.Embedded {
+			out = append(out, a)
+		}
+	}
 	return out
 }
 

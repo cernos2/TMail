@@ -255,6 +255,32 @@ type crmExtract struct {
 	} `json:"attachments"`
 }
 
+// hasCardDoc: one of the documents read is a company card / requisites sheet, by its name or by
+// the type the model gave it.
+func (x crmExtract) hasCardDoc(readDocs []string) bool {
+	read := map[string]bool{}
+	for _, n := range readDocs {
+		if reCardDoc.MatchString(n) {
+			return true
+		}
+		read[n] = true
+	}
+	for _, a := range x.Attachments {
+		if a.Type == "requisites" && read[a.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// senderFree: the sender is not tied to any company other than the one with this tax ID.
+func (s *Server) senderFree(ctx context.Context, email, taxID string) bool {
+	n := 1
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM crm_person_companies l JOIN crm_parties p ON p.id = l.person_id JOIN crm_parties c ON c.id = l.company_id
+		WHERE p.kind='person' AND p.emails @> ARRAY[$1::text] AND ($2 = '' OR c.inn <> $2)`, strings.ToLower(email), normTaxID(taxID)).Scan(&n)
+	return n == 0
+}
+
 // unify brings the answer of either prompt version to the old field names: tax_id → inn,
 // bank_code → bik, buyer_tax_id → buyer_inn (an old field already filled wins).
 func (x *crmExtract) unify() {
@@ -360,7 +386,7 @@ func (s *Server) crmProcess(ctx context.Context, c *client.Client, account, fold
 	set := new(imap.SeqSet)
 	set.AddNum(m.UID)
 	if msg, err := fetchOne(c, set, []imap.FetchItem{imap.FetchUid, imap.FetchBodyStructure}); err == nil && msg != nil && msg.BodyStructure != nil {
-		all = attachmentsOf(msg.BodyStructure)
+		all = fileAttachments(attachmentsOf(msg.BodyStructure))
 		for _, a := range all {
 			fmt.Fprintf(&atts, "- %s (%s, %d KB)\n", a.Name, a.Mime, a.Size/1024)
 			wanted := reDocExt.MatchString(a.Name) && a.Size < 8<<20 && (reDocName.MatchString(a.Name) || len(all) == 1 && !strings.HasPrefix(a.Mime, "image/"))
@@ -457,6 +483,14 @@ func (s *Server) crmProcess(ctx context.Context, c *client.Client, account, fold
 	}
 	// Third party: a forwarded letter, a colleague's letter, or the model says the company is not the sender's.
 	thirdParty := forward || colleague || (x.SenderCompany != nil && !*x.SenderCompany)
+	// A private mailbox (mail.ru, gmail.com) gives the model no signature or domain to judge by: a
+	// company card sent from it, not forwarded, is the card of the company the sender writes for —
+	// unless the sender is already known to work for another company.
+	cardDoc := x.hasCardDoc(readDocs)
+	if thirdParty && !forward && !colleague && publicDomains[domain] && cardDoc && x.Company.Name+x.Company.INN != "" &&
+		s.senderFree(ctx, m.From.Email, x.Company.INN) {
+		thirdParty = false
+	}
 	// The company's own website is on another domain than the sender's mail: not the sender's company.
 	if h := siteHost(x.Company.Website); !thirdParty && h != "" && !publicDomains[domain] {
 		if h != domain && !strings.HasSuffix(domain, "."+h) && !strings.HasSuffix(h, "."+domain) {
@@ -490,10 +524,6 @@ func (s *Server) crmProcess(ctx context.Context, c *client.Client, account, fold
 	// from a company card / requisites document — never from an invoice it passes on: an invoice
 	// carries the supplier's bank, and the model tends to pin it on the buyer.
 	if !thirdParty && len(readDocs) > 0 {
-		cardDoc := false
-		for _, n := range readDocs {
-			cardDoc = cardDoc || reCardDoc.MatchString(n)
-		}
 		if !cardDoc {
 			x.Company.BankName, x.Company.BIK, x.Company.Account, x.Company.CorrAccount, x.Company.LegalAddress = "", "", "", "", ""
 		}

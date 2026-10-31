@@ -410,8 +410,12 @@ func (s *Server) indexQuery(ctx context.Context, account, folder, text string, b
 	norm := normSearch(strings.TrimSpace(text))
 	var terms []string
 	words := reSearchWord.FindAllString(norm, 12)
+	address := ""
 	if reAddressQuery.MatchString(text) {
 		words = nil // an address or a domain: where it stands in the headers, not mentioned in a text
+		if strings.Contains(strings.TrimPrefix(norm, "@"), "@") {
+			address = strings.TrimSpace(norm) // a whole address: also where the text mentions it ("write to …")
+		}
 	}
 	for _, w := range words {
 		if utf8.RuneCountInString(w) >= 2 {
@@ -424,6 +428,10 @@ func (s *Server) indexQuery(ctx context.Context, account, folder, text string, b
 	if len(terms) > 0 {
 		q += ` OR tsv @@ to_tsquery('` + searchConfig + `', $4)`
 		args = append(args, strings.Join(terms, " & "))
+	}
+	if address != "" {
+		args = append(args, address)
+		q += fmt.Sprintf(` OR tsv @@ plainto_tsquery('`+searchConfig+`', $%d)`, len(args))
 	}
 	q += `)`
 	if before > 1 {

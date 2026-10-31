@@ -78,7 +78,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, sess *Se
 			writeErr(w, http.StatusNotFound, "Folder not found")
 			return
 		}
-		if _, err := c.Select(folder, true); err != nil {
+		mbox, err := c.Select(folder, true)
+		if err != nil {
 			writeErr(w, http.StatusNotFound, "Folder not found")
 			return
 		}
@@ -127,6 +128,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, sess *Se
 			page = 0
 		}
 		switch {
+		case text == "" && before <= 1 && !hasFilters(base()):
+			// The first page of a whole folder: the last messages by number, not a search that
+			// returns every UID of the folder (80 000 in a big Gmail archive).
+			uids, err = lastUIDs(c, mbox.Messages, uint32(limit)+1)
 		case text == "":
 			crit := base()
 			if before > 1 {
@@ -173,6 +178,23 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, sess *Se
 		s.attachSentBy(r.Context(), acc.Address, msgs)
 		writeJSON(w, http.StatusOK, map[string]any{"folder": folder, "messages": msgs, "hasMore": hasMore, "partial": partial, "indexed": indexed})
 	})
+}
+
+// lastUIDs: the UIDs of the last n messages of the selected folder of `total` messages.
+func lastUIDs(c *client.Client, total, n uint32) ([]uint32, error) {
+	if total == 0 {
+		return nil, nil
+	}
+	set := new(imap.SeqSet)
+	set.AddRange(max(1, total-min(total, n)+1), total)
+	ch := make(chan *imap.Message, n)
+	done := make(chan error, 1)
+	go func() { done <- c.Fetch(set, []imap.FetchItem{imap.FetchUid}, ch) }()
+	var uids []uint32
+	for m := range ch {
+		uids = append(uids, m.Uid)
+	}
+	return uids, <-done
 }
 
 // previews: list previews of recent letters (~60 000, a few MB), the oldest forgotten first.

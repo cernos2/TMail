@@ -23,7 +23,7 @@ export type Summary = {
   messageId: string, sentBy?: SentBy, fresh?: boolean, dmarc?: string, attachments?: Attachment[], labels?: number[],
   inReplyTo?: string, refs?: string[]
 }
-export type Attachment = { part: string, name: string, mime: string, size: number, inline: boolean, preview?: '' | 'image' | 'pdf' | 'text' | 'office', risk?: '' | 'exec' | 'macro' | 'html' }
+export type Attachment = { part: string, name: string, mime: string, size: number, inline: boolean, preview?: '' | 'image' | 'pdf' | 'text' | 'office', risk?: '' | 'exec' | 'macro' | 'html', embedded?: boolean }
 export type FullMessage = Summary & {
   html: string, remoteImages: boolean, attachments: Attachment[], replyTo: Addr[],
   inReplyTo: string, references: string, spam: boolean, auth: Record<string, string>
@@ -160,11 +160,12 @@ export const visibleMessages = computed(() => {
 
 // Reply/forward prefixes of subjects, as mail programs write them in English, German and Russian
 // (detection only, not interface text).
-const RE_PREFIX = /^\s*((re|fwd?|aw|wg|отв|пересл|ответ)(\[\d+\])?\s*:\s*)+/i
+// Spam tags put before the subject by other servers ("***SPAM*** Re: Order") count as prefixes too.
+const RE_PREFIX = /^\s*(((re|fwd?|aw|wg|отв|пересл|ответ)(\[\d+\])?\s*:|\*+\s*spam\s*\*+|\[spam\])\s*)+/i
 export const baseSubject = (s: string) => (s || '').replace(RE_PREFIX, '').replace(/\s+/g, ' ').trim().toLowerCase()
-
-// Letters are grouped by Message-ID/In-Reply-To/References, and by subject ("Order", "Re: Order")
-// when they also share a correspondent — so two customers both writing "Stock request" stay apart.
+// Like Gmail: a letter joins a conversation when it refers to one of its letters (Message-ID,
+// In-Reply-To, References) AND has the same subject without Re:/Fwd:. The subject alone never joins
+// (a client's every new "Request" is its own conversation), and a changed subject starts a new one.
 export const visibleThreads = computed<Thread[]>(() => {
   const list = visibleMessages.value
   if (mail.view.role === 'drafts' && !mail.view.folder) return list.map(m => ({ key: keyOf(m), items: [m], latest: m }))
@@ -172,22 +173,14 @@ export const visibleThreads = computed<Thread[]>(() => {
   const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
   const union = (a: number, b: number) => { const x = find(a), y = find(b); if (x !== y) parent[Math.max(x, y)] = Math.min(x, y) }
   const byId = new Map<string, number>()
-  const bySubject = new Map<string, number[]>()
-  const people = (m: Summary) => new Set([m.from, ...m.to, ...(m.cc || [])].map(a => a.email.toLowerCase()).filter(e => e && e !== m.account))
   list.forEach((m, i) => {
+    const subj = baseSubject(m.subject)
     for (const id of [m.messageId, m.inReplyTo, ...(m.refs || [])]) {
       if (!id) continue
-      const k = `${m.account}|${id}`
+      const k = `${m.account}|${subj}|${id}`
       const j = byId.get(k)
       if (j === undefined) byId.set(k, i)
       else union(i, j)
-    }
-    const subj = baseSubject(m.subject)
-    if (subj.length >= 3) {
-      const k = `${m.account}|${subj}`
-      const mine = people(m)
-      for (const j of bySubject.get(k) || []) if ([...people(list[j])].some(e => mine.has(e))) union(i, j)
-      bySubject.set(k, [...(bySubject.get(k) || []), i])
     }
   })
   const groups = new Map<number, Summary[]>()
@@ -930,7 +923,7 @@ export async function openDraft(m: Summary, opts: { inline?: boolean, quiet?: bo
   c.replyFolder = full.replyFolder || ''
   c.replyUid = Number(full.replyUid) || 0
   // The draft itself is the source of its attachments and pasted images.
-  c.carry = { account: m.account, folder: m.folder, uid: m.uid, parts: full.attachments }
+  c.carry = { account: m.account, folder: m.folder, uid: m.uid, parts: full.attachments.filter(a => !a.embedded) }
   c.draftAccount = m.account
   c.draftUid = m.uid
   c.savedAt = full.date

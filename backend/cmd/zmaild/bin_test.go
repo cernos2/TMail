@@ -61,7 +61,7 @@ func TestTextForPreviewWrongDeclared(t *testing.T) {
 }
 
 func TestBaseSubject(t *testing.T) {
-	for in, want := range map[string]string{"Re: RE: Fwd: Заказ  Сервис": "заказ сервис", "Отв: Счёт": "счёт", "Re[2]: Test": "test", "Заказ": "заказ"} {
+	for in, want := range map[string]string{"Re: RE: Fwd: Заказ  Сервис": "заказ сервис", "Отв: Счёт": "счёт", "Re[2]: Test": "test", "Заказ": "заказ", "RE: ***SPAM*** Re: Запрос ООО": "запрос ооо"} {
 		if got := baseSubject(in); got != want {
 			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
