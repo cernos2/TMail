@@ -130,6 +130,24 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, sess *Se
 			writeJSON(w, http.StatusOK, map[string]any{"folder": "", "messages": msgs, "hasMore": cursor > 0, "cursor": cursor, "indexed": true})
 			return
 		}
+		// The Inbox with the letters of the own folders (see inboxfeed.go); "before" is its cursor.
+		if text == "" && q.Get("folder") == "" && (q.Get("role") == "" || q.Get("role") == "inbox") {
+			feed, err := s.feedFolders(r.Context(), c, acc.Address)
+			if err != nil {
+				serverErr(w, "inbox feed", err)
+				return
+			}
+			if feed != nil {
+				msgs, cursor, err := s.inboxFeed(c, acc.Address, feed, base, q.Get("before"), limit)
+				if err != nil {
+					serverErr(w, "inbox feed", err)
+					return
+				}
+				s.attachSentBy(r.Context(), acc.Address, msgs)
+				writeJSON(w, http.StatusOK, map[string]any{"folder": folder, "messages": msgs, "hasMore": cursor != "", "cursor": cursor})
+				return
+			}
+		}
 		if before == 1 {
 			writeJSON(w, http.StatusOK, map[string]any{"folder": folder, "messages": []Summary{}, "hasMore": false})
 			return

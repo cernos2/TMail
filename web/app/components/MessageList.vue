@@ -173,6 +173,8 @@ function folderTag(m: Summary) {
   if (role === 'inbox') return ''
   return role && ROLE_NAMES[role] ? ROLE_NAMES[role] : m.folder
 }
+// The Inbox shows the letters of the own folders too, and a search goes through every folder.
+const acrossFolders = computed(() => searchesEverywhere() || (!mail.view.folder && !mail.view.label && ['inbox', 'flagged'].includes(mail.view.role)))
 const ROLE_ICONS_ROW = (m: Summary) => ({ sent: 'sent', drafts: 'drafts', archive: 'archive', scheduled: 'sendClock', snoozed: 'clock' } as Record<string, string>)[roleOfRow(m)] || 'folder'
 const roleOfRow = (m: Summary) => mail.folders[m.account]?.find(f => f.name === m.folder)?.role || ''
 function rowName(m: Summary) {
@@ -363,8 +365,8 @@ function onScroll(e: Event) {
               </button>
               <button v-if="threadFiles(th).length > 3" type="button" class="file-pill more" :title="t('list.moreFiles', { n: threadFiles(th).length - 3 })" @click.stop="openRow(th.latest)" @keydown.enter.stop>+{{ threadFiles(th).length - 3 }}</button>
             </div>
-            <div v-if="multi || th.latest.sentBy || (searchesEverywhere() && folderTag(th.latest))" class="tags">
-              <span v-if="searchesEverywhere() && folderTag(th.latest)" class="tag folder-tag"><AppIcon :name="ROLE_ICONS_ROW(th.latest)" />{{ folderTag(th.latest) }}</span>
+            <div v-if="multi || th.latest.sentBy || (acrossFolders && folderTag(th.latest))" class="tags">
+              <span v-if="acrossFolders && folderTag(th.latest)" class="tag folder-tag"><AppIcon :name="ROLE_ICONS_ROW(th.latest)" />{{ folderTag(th.latest) }}</span>
               <span v-if="multi" class="to-pill"><span class="dot" :style="{ background: accountColor(th.latest.account) }"></span>{{ th.latest.account }}</span>
               <span v-if="th.latest.sentBy" class="tag" :title="th.latest.sentBy.name">{{ t('list.sentBy', { login: th.latest.sentBy.login }) }}</span>
             </div>

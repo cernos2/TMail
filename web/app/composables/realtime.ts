@@ -30,7 +30,13 @@ export function connectEvents() {
         }
         break
       case 'filed': // auto-sorting put a new letter into an ordinary folder
-        if (ev.message) { notifyFiled(ev.message, m => setView({ account: m.account, folder: m.folder })); refreshFoldersSoon(300) }
+        if (ev.message) {
+          notifyFiled(ev.message, m => setView({ account: m.account, folder: m.folder }))
+          refreshFoldersSoon(300)
+          // The Inbox shows the letters of ordinary folders too: it is reloaded with the new one.
+          const v = mail.view
+          if (!v.folder && !v.label && v.role === 'inbox' && (!v.account || v.account === ev.message.account) && !mail.loading) loadMessages(false, true)
+        }
         break
       case 'reminder':
         if (ev.event) showReminder(ev.event)

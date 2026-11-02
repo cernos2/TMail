@@ -73,7 +73,7 @@ export const mail = reactive({
   folders: {} as Record<string, Folder[]>,
   view: { account: null as string | null, role: 'inbox', folder: null as string | null, label: null as number | null },
   messages: [] as Summary[],
-  cursors: {} as Record<string, { before: number, hasMore: boolean }>,
+  cursors: {} as Record<string, { before: number | string, hasMore: boolean }>, // a UID, a date or the Inbox feed's cursor
   loading: false,
   listVeil: false, // a load the user asked for (folder, search, filter): the list is veiled
   loadingMore: false,
@@ -298,7 +298,7 @@ function scope(): string[] {
 // user asked for this folder only; a label already spans folders.
 export const searchesEverywhere = () => !!mail.filters.q.trim() && !mail.filters.here && !mail.view.label
 
-function queryFor(account: string, before = 0, limit = PAGE) {
+function queryFor(account: string, before: number | string = 0, limit = PAGE) {
   const q: Record<string, string | number> = { account, limit }
   if (mail.view.label) q.label = mail.view.label
   if (mail.view.folder) q.folder = mail.view.folder
@@ -340,7 +340,7 @@ export async function loadMessages(again = false, quiet = false) {
     if (r.status === 'fulfilled') {
       msgs.push(...r.value.messages)
       const uids = r.value.messages.map(m => m.uid)
-      // Across folders the next page is asked by date (the server's cursor), in one folder by UID.
+      // Across folders the next page is asked by the server's cursor, in one folder by UID.
       const cur = (r.value as any).cursor
       cursors[acc] = { before: cur !== undefined ? cur : uids.length ? Math.min(...uids) : 0, hasMore: r.value.hasMore }
     } else {
@@ -367,7 +367,7 @@ export async function loadMore(rows = ROWS) {
   const want = visibleThreads.value.length + rows
   try {
     for (let round = 0; round < 8 && seq === loadSeq; round++) {
-      const accs = Object.entries(mail.cursors).filter(([, c]) => c.hasMore && c.before > 0).map(([a]) => a)
+      const accs = Object.entries(mail.cursors).filter(([, c]) => c.hasMore && c.before && c.before !== 1).map(([a]) => a)
       if (!accs.length || await loadPage(accs, seq) === false || visibleThreads.value.length >= want) break
     }
   } catch (e: any) {
