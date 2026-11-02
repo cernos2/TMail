@@ -13,6 +13,17 @@ export function confirmDialog(title: string, text = '', opts: { ok?: string, dan
   })
 }
 
+// choiceDialog: several answers (e.g. "only this one" / "the whole series"); null when closed.
+export type Choice = { id: string, label: string, danger?: boolean }
+export const choiceState = reactive({ open: false, title: '', text: '', choices: [] as Choice[], resolve: null as null | ((v: string | null) => void) })
+export function choiceDialog(title: string, text: string, choices: Choice[]): Promise<string | null> {
+  return new Promise(resolve => { Object.assign(choiceState, { open: true, title, text, choices, resolve }) })
+}
+export function closeChoice(v: string | null) {
+  choiceState.resolve?.(v)
+  Object.assign(choiceState, { open: false, resolve: null })
+}
+
 export function closeConfirm(v: boolean) {
   confirmState.resolve?.(v)
   Object.assign(confirmState, { open: false, resolve: null })

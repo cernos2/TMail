@@ -15,6 +15,9 @@ import { mail, act, startCompose, imagesAllowed, setImagePrefs, closeMessage, ac
 import { longDate, displayName } from '~/composables/format'
 import { isDark } from '~/composables/theme'
 import { t } from '~/composables/i18n'
+import { snooze, snoozePresets, sendPresets, scheduledOf, snoozedOf, scheduledAction, unsnooze, whenLabel, loadLater } from '~/composables/later'
+import { ROLE_NAMES } from '~/composables/mail'
+import { home } from '~/composables/home'
 
 const m = computed(() => mail.current)
 const summary = computed<Summary | null>(() => m.value)
@@ -51,6 +54,26 @@ const avWarnings = computed(() => {
     .filter(k => kinds.has(k)).map(k => ({ kind: k, title: RISK_TEXT[k][0], text: RISK_TEXT[k][1] }))
 })
 const inTrash = computed(() => !!m.value && m.value.folder === folderOf('trash'))
+// A public OpenPGP key attached to the letter: saved for encrypting the answers.
+const pgpKeyAtt = computed(() => m.value?.attachments.find(a => a.mime === 'application/pgp-keys' || /\.(asc|pub)$/i.test(a.name) && /key|pub/i.test(a.name)))
+const pgpKeySaved = ref(false)
+watch(() => m.value?.uid, () => { pgpKeySaved.value = false })
+async function savePgpKey() {
+  const x = m.value, a = pgpKeyAtt.value
+  if (!x || !a) return
+  try {
+    const r = await api<{ emails: string[] }>('/api/pgp/contacts', { method: 'POST', body: { account: x.account, folder: x.folder, uid: x.uid, part: a.part } })
+    pgpKeySaved.value = true
+    toast(t('pgp.keySaved', { emails: r.emails.join(', ') }))
+  } catch (e: any) { toast(e.message, { kind: 'err' }) }
+}
+// Letters waiting in Scheduled / Snoozed: when they leave or come back, and what can be done.
+const inScheduled = computed(() => !!m.value && m.value.folder === folderOf('scheduled'))
+const inSnoozed = computed(() => !!m.value && m.value.folder === folderOf('snoozed'))
+const schedInfo = computed(() => inScheduled.value && m.value ? scheduledOf(m.value) : undefined)
+const snoozeInfo = computed(() => inSnoozed.value && m.value ? snoozedOf(m.value) : undefined)
+watch(() => inScheduled.value || inSnoozed.value, on => { if (on) loadLater() }, { immediate: true })
+const snoozeBack = computed(() => { const f = snoozeInfo.value?.folder || 'INBOX'; return f === 'INBOX' ? ROLE_NAMES.inbox : f })
 const canReply = computed(() => !!mail.me?.accounts.some(a => a.canSend))
 function folderOf(role: string) {
   return m.value ? mail.folders[m.value.account]?.find(f => f.role === role)?.name : undefined
@@ -201,6 +224,7 @@ const threadNewText = computed(() => t('reader.threadNew', { name: '\u0000' }).s
 <template>
   <section class="reader" :aria-label="t('reader.letter')">
     <CrmView v-if="!m && !mail.currentLoading && !mail.currentError && crm.open" />
+    <HomeView v-else-if="!m && !mail.currentLoading && !mail.currentError && home.open" />
     <CalendarView v-else-if="!m && !mail.currentLoading && !mail.currentError" />
 
     <template v-else>
@@ -235,6 +259,9 @@ const threadNewText = computed(() => t('reader.threadNew', { name: '\u0000' }).s
               <button v-if="mail.me?.isAdmin" type="button" class="tp-item" @click="close(); senderRule('block', true)"><AppIcon name="shieldX" /> {{ t('reader.blockDomain', { domain: m!.from.email.split('@')[1] }) }}</button>
               <button type="button" class="tp-item" @click="close(); senderRule('allow')"><AppIcon name="shield" /> {{ t('reader.trust') }}</button>
             </div>
+          </ToolPop>
+          <ToolPop v-if="!inTrash && !inSnoozed && !inScheduled" v-slot="{ close }" :title="t('later.snooze')" icon="clock" :down="true">
+            <WhenPicker :title="t('later.snoozeTitle')" :presets="snoozePresets()" :ok="t('later.snooze')" @pick="d => { close(); snooze(targets, d) }" />
           </ToolPop>
           <button class="icon-btn" :title="t('reader.addToCalendar')" :aria-label="t('reader.addToCalendar')" @click="toCalendar"><AppIcon name="cal" /></button>
           <span class="grow"></span>
@@ -337,9 +364,33 @@ const threadNewText = computed(() => t('reader.threadNew', { name: '\u0000' }).s
             <AppIcon name="shieldX" />
             <span>{{ t('reader.riskyLinks', { n: riskyCount }) }}</span>
           </div>
+          <div v-if="m.pgp" class="auth">
+            <span v-if="m.pgp.encrypted" class="badge pgp" :class="{ bad: !m.pgp.decrypted }"><AppIcon :name="m.pgp.decrypted ? 'lock' : 'alert'" />{{ m.pgp.decrypted ? t('pgp.encryptedBadge') : t('pgp.cannotDecrypt') }}</span>
+            <span v-if="m.pgp.signed" class="badge pgp" :class="{ warn: m.pgp.problem === 'unknown', bad: m.pgp.problem === 'bad' || m.pgp.problem === 'broken' }"
+                  :title="m.pgp.signer ? t('pgp.fingerprint', { fp: m.pgp.signer }) : ''">
+              <AppIcon :name="m.pgp.verified ? 'shield' : 'shieldX'" />{{ m.pgp.verified ? t('pgp.signedOk') : m.pgp.problem === 'unknown' ? t('pgp.signedUnknown') : t('pgp.signedBad') }}</span>
+          </div>
+          <div v-if="pgpKeyAtt && !pgpKeySaved" class="notice"><AppIcon name="key" /><span>{{ t('pgp.keyAttached', { email: m.from.email }) }}</span>
+            <button class="btn sm" style="margin-left:auto" @click="savePgpKey"><AppIcon name="check" />{{ t('pgp.saveKey') }}</button></div>
           <div v-if="authBadges.length || m.sentBy" class="auth">
             <span v-for="b in authBadges" :key="b.text" class="badge" :class="b.cls"><AppIcon :name="b.cls === 'ok' ? 'shield' : 'shieldX'" />{{ b.text }}</span>
             <span v-if="m.sentBy" class="sent-by"><AppIcon name="user" />{{ m.sentBy.name ? t('reader.sentByNamed', { login: m.sentBy.login, name: m.sentBy.name }) : t('reader.sentBy', { login: m.sentBy.login }) }}</span>
+          </div>
+          <div v-if="schedInfo" class="notice later-note" :class="{ danger: schedInfo.status === 'failed' }" role="status">
+            <AppIcon name="sendClock" />
+            <span>{{ schedInfo.status === 'failed' ? t('later.failedBanner', { error: schedInfo.error || '' }) : t('later.scheduledBanner', { when: whenLabel(schedInfo.sendAt, true) }) }}</span>
+            <span class="ln-btns">
+              <button class="btn sm primary" @click="scheduledAction(schedInfo, 'now')"><AppIcon name="sent" />{{ t('later.sendNow') }}</button>
+              <ToolPop v-slot="{ close }" :title="t('later.reschedule')" :label="t('later.reschedule')" icon="clock" :down="true">
+                <WhenPicker :title="t('later.sendLaterTitle')" :presets="sendPresets()" :ok="t('later.schedule')" @pick="d => { close(); scheduledAction(schedInfo!, 'reschedule', d) }" />
+              </ToolPop>
+              <button class="btn sm" @click="scheduledAction(schedInfo, 'cancel')"><AppIcon name="undo" />{{ t('later.cancelSend') }}</button>
+            </span>
+          </div>
+          <div v-else-if="snoozeInfo" class="notice later-note" role="status">
+            <AppIcon name="clock" />
+            <span>{{ t('later.snoozedBanner', { when: whenLabel(snoozeInfo.until, true), folder: snoozeBack }) }}</span>
+            <span class="ln-btns"><button class="btn sm" @click="unsnooze(m)"><AppIcon name="inbox" />{{ t('later.unsnooze') }}</button></span>
           </div>
           <div v-for="w in avWarnings" :key="w.kind" class="notice av-warn" :class="w.kind === 'virus' || w.kind === 'exec' || w.kind === 'encrypted' || w.kind === 'unchecked' ? 'danger' : 'warn'">
             <AppIcon :name="w.kind === 'virus' ? 'shieldX' : 'alert'" /><span><b>{{ w.title }}.</b> {{ w.text }}</span>

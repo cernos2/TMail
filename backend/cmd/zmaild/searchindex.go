@@ -407,33 +407,8 @@ func (s *Server) indexSearch(ctx context.Context, account, folder, text string, 
 }
 
 func (s *Server) indexQuery(ctx context.Context, account, folder, text string, before uint32, page int) ([]uint32, error) {
-	norm := normSearch(strings.TrimSpace(text))
-	var terms []string
-	words := reSearchWord.FindAllString(norm, 12)
-	address := ""
-	if reAddressQuery.MatchString(text) {
-		words = nil // an address or a domain: where it stands in the headers, not mentioned in a text
-		if strings.Contains(strings.TrimPrefix(norm, "@"), "@") {
-			address = strings.TrimSpace(norm) // a whole address: also where the text mentions it ("write to …")
-		}
-	}
-	for _, w := range words {
-		if utf8.RuneCountInString(w) >= 2 {
-			terms = append(terms, w+":*")
-		}
-	}
-	like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(norm) + "%"
-	q := `SELECT uid FROM msg_index WHERE account=$1 AND folder=$2 AND (hdr LIKE $3`
-	args := []any{account, folder, like}
-	if len(terms) > 0 {
-		q += ` OR tsv @@ to_tsquery('` + searchConfig + `', $4)`
-		args = append(args, strings.Join(terms, " & "))
-	}
-	if address != "" {
-		args = append(args, address)
-		q += fmt.Sprintf(` OR tsv @@ plainto_tsquery('`+searchConfig+`', $%d)`, len(args))
-	}
-	q += `)`
+	cond, args := indexMatch(text, []any{account, folder})
+	q := `SELECT uid FROM msg_index WHERE account=$1 AND folder=$2 AND ` + cond
 	if before > 1 {
 		args = append(args, int64(before))
 		q += fmt.Sprintf(` AND uid < $%d`, len(args))
@@ -450,6 +425,37 @@ func (s *Server) indexQuery(ctx context.Context, account, folder, text string, b
 		return s.idxRows(ctx, "SET LOCAL enable_indexscan = off; SET LOCAL enable_seqscan = off", q+limit, args)
 	}
 	return s.idxRows(ctx, "SET LOCAL enable_seqscan = off", q, args)
+}
+
+// indexMatch: the condition matching a searched text in msg_index (its parameters follow args).
+func indexMatch(text string, args []any) (string, []any) {
+	norm := normSearch(strings.TrimSpace(text))
+	var terms []string
+	words := reSearchWord.FindAllString(norm, 12)
+	address := ""
+	if reAddressQuery.MatchString(text) {
+		words = nil // an address or a domain: where it stands in the headers, not mentioned in a text
+		if strings.Contains(strings.TrimPrefix(norm, "@"), "@") {
+			address = strings.TrimSpace(norm) // a whole address: also where the text mentions it ("write to …")
+		}
+	}
+	for _, w := range words {
+		if utf8.RuneCountInString(w) >= 2 {
+			terms = append(terms, w+":*")
+		}
+	}
+	like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(norm) + "%"
+	args = append(args, like)
+	q := fmt.Sprintf(`(hdr LIKE $%d`, len(args))
+	if len(terms) > 0 {
+		args = append(args, strings.Join(terms, " & "))
+		q += fmt.Sprintf(` OR tsv @@ to_tsquery('`+searchConfig+`', $%d)`, len(args))
+	}
+	if address != "" {
+		args = append(args, address)
+		q += fmt.Sprintf(` OR tsv @@ plainto_tsquery('`+searchConfig+`', $%d)`, len(args))
+	}
+	return q + `)`, args
 }
 
 // idxRows runs a search of the index with the given planner settings, in its own transaction.

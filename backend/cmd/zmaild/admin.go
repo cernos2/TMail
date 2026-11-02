@@ -92,6 +92,11 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/domains/{id}/dns", s.admin(s.adminDomainDNS))
 	mux.HandleFunc("GET /api/admin/server", s.admin(s.adminServer))
 	mux.HandleFunc("GET /api/admin/audit", s.admin(s.adminAudit))
+	mux.HandleFunc("GET /api/admin/mail-settings", s.admin(s.adminMailSettings))
+	mux.HandleFunc("PUT /api/admin/mail-settings", s.admin(s.adminMailSettingsSave))
+	mux.HandleFunc("POST /api/admin/mail-settings/relay-test", s.admin(s.adminRelayTest))
+	mux.HandleFunc("POST /api/admin/config/export", s.admin(s.adminConfigExport))
+	mux.HandleFunc("POST /api/admin/config/import", s.admin(s.adminConfigImport))
 }
 
 // ---------- audit ----------
@@ -405,6 +410,10 @@ type adminMailbox struct {
 	PurgeAfter *time.Time `json:"purgeAfter"`
 	DeletedBy  string     `json:"deletedBy"`
 	Template   string     `json:"template"`
+	LimitHour  *int       `json:"limitHour"` // own sending limits; null = the server-wide ones
+	LimitDay   *int       `json:"limitDay"`
+	SentHour   int        `json:"sentHour"` // letters sent in the last hour, recipients in the last day
+	SentDay    int        `json:"sentDay"`
 	Users      []struct {
 		ID       int64  `json:"id"`
 		Login    string `json:"login"`
@@ -417,6 +426,9 @@ func (s *Server) adminMailboxes(w http.ResponseWriter, r *http.Request, sess *Se
 	rows, err := s.db.Query(r.Context(), `
 		SELECT m.id, m.address, d.name, m.display_name, m.quota_bytes, m.active, m.created_at,
 		       coalesce(ms.signature, ''), coalesce(ms.template, ''), d.external, m.deleted_at, m.purge_after, m.deleted_by,
+		       m.limit_hour, m.limit_day,
+		       (SELECT count(*) FROM send_log l WHERE l.mailbox = m.address AND NOT l.blocked AND l.at > now() - interval '1 hour'),
+		       (SELECT COALESCE(sum(recipients), 0) FROM send_log l WHERE l.mailbox = m.address AND NOT l.blocked AND l.at > now() - interval '24 hours'),
 		       coalesce((SELECT json_agg(json_build_object('id', u.id, 'login', u.login, 'canSend', um.can_send, 'personal', um.personal) ORDER BY u.login)
 		                 FROM user_mailboxes um JOIN users u ON u.id = um.user_id WHERE um.mailbox_id = m.id), '[]')
 		FROM mailboxes m JOIN domains d ON d.id = m.domain_id
@@ -429,7 +441,8 @@ func (s *Server) adminMailboxes(w http.ResponseWriter, r *http.Request, sess *Se
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (adminMailbox, error) {
 		var m adminMailbox
 		var users []byte
-		err := row.Scan(&m.ID, &m.Address, &m.Domain, &m.Name, &m.QuotaBytes, &m.Active, &m.CreatedAt, &m.Signature, &m.Template, &m.External, &m.DeletedAt, &m.PurgeAfter, &m.DeletedBy, &users)
+		err := row.Scan(&m.ID, &m.Address, &m.Domain, &m.Name, &m.QuotaBytes, &m.Active, &m.CreatedAt, &m.Signature, &m.Template, &m.External, &m.DeletedAt, &m.PurgeAfter, &m.DeletedBy,
+			&m.LimitHour, &m.LimitDay, &m.SentHour, &m.SentDay, &users)
 		if err == nil {
 			err = json.Unmarshal(users, &m.Users)
 		}
@@ -534,8 +547,13 @@ func (s *Server) adminUpdateMailbox(w http.ResponseWriter, r *http.Request, sess
 		Active     *bool   `json:"active"`
 		Signature  *string `json:"signature"`
 		Template   *string `json:"template"`
+		Limits     *struct {
+			Hour *int `json:"hour"` // null: the server-wide limit, 0: none
+			Day  *int `json:"day"`
+		} `json:"limits"`
 	}
-	if !ok || readJSON(r, &in) != nil || (in.QuotaBytes != nil && *in.QuotaBytes < 0) {
+	if !ok || readJSON(r, &in) != nil || (in.QuotaBytes != nil && *in.QuotaBytes < 0) ||
+		(in.Limits != nil && ((in.Limits.Hour != nil && *in.Limits.Hour < 0) || (in.Limits.Day != nil && *in.Limits.Day < 0))) {
 		writeErr(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
@@ -547,6 +565,12 @@ func (s *Server) adminUpdateMailbox(w http.ResponseWriter, r *http.Request, sess
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "Mailbox not found")
 		return
+	}
+	if in.Limits != nil {
+		if _, err := s.db.Exec(r.Context(), `UPDATE mailboxes SET limit_hour=$2, limit_day=$3 WHERE id=$1`, id, in.Limits.Hour, in.Limits.Day); err != nil {
+			serverErr(w, "mailbox limits", err)
+			return
+		}
 	}
 	if in.Signature != nil || in.Template != nil {
 		var sig, tpl string
@@ -563,7 +587,7 @@ func (s *Server) adminUpdateMailbox(w http.ResponseWriter, r *http.Request, sess
 			return
 		}
 	}
-	s.auditAdmin(r, sess, "mailbox.update", addr, map[string]any{"name": in.Name, "quota": in.QuotaBytes, "active": in.Active})
+	s.auditAdmin(r, sess, "mailbox.update", addr, map[string]any{"name": in.Name, "quota": in.QuotaBytes, "active": in.Active, "limits": in.Limits})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

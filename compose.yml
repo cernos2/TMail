@@ -65,6 +65,7 @@ services:
       - letsencrypt:/etc/letsencrypt
       - tls:/tls
       - acme:/acme
+      - certnames:/names:ro
     logging: *logging
 
   # Webmail backend + Nuxt frontend (HTTPS on 443, ACME challenges and redirect on 80)
@@ -111,6 +112,8 @@ services:
       - previewsock:/run/preview
       - previewcache:/var/cache/tmail
       - ./import:/import:ro # Google Takeout archives to import (admin → import-mbox)
+      - postfixdyn:/postfix-dyn # relay settings for Postfix (admin → mail server)
+      - certnames:/certnames # autoconfig./autodiscover./mta-sts. names for the certificate
     logging: *logging
 
   # S3 storage (Garage) for large files sent as links. Localhost only; TMAIL serves the links.
@@ -177,12 +180,15 @@ services:
       postgres: {condition: service_healthy}
       dovecot: {condition: service_started}
       rspamd: {condition: service_started}
+      unbound: {condition: service_started}
     environment:
       MAIL_HOSTNAME: ${MAIL_HOSTNAME:?}
       MTA_DB_PASSWORD: ${MTA_DB_PASSWORD:?}
     volumes:
       - tls:/etc/zmail/tls:ro
       - postfixspool:/var/spool/postfix
+      - postfixdyn:/etc/postfix/dyn
+      - ./services/postfix/resolv.conf:/etc/resolv.conf:ro
     logging: *logging
 
   # Admin CLI: docker compose run --rm ctl <command>
@@ -214,4 +220,6 @@ volumes:
   garage-data:
   vmail:
   postfixspool:
+  postfixdyn:
+  certnames:
   clamdb:

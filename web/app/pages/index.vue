@@ -4,6 +4,7 @@ import { mail, logout, closeMessage, loadMe, loadFolders, loadMessages, unreadIn
 import { connectEvents, disconnectEvents } from '~/composables/realtime'
 import { cal } from '~/composables/calendar'
 import { crm } from '~/composables/crm'
+import { home } from '~/composables/home'
 import { loadAIActions } from '~/composables/ai'
 import { folders } from '~/composables/folders'
 import { labels } from '~/composables/labels'
@@ -12,18 +13,24 @@ import { applyAppearance, savedAppearance, type Theme } from '~/composables/sche
 import { api } from '~/composables/api'
 import { applyQuery, syncUrl } from '~/composables/urlstate'
 import { t, i18n } from '~/composables/i18n'
+import { loadLater } from '~/composables/later'
 
 watchCompose()
 const ready = ref(false)
 const fatal = ref('')
 const lookOpen = ref(false)
-try { document.documentElement.dataset.unread = localStorage.getItem('tmail.unread') || 'bg' } catch {}
+try {
+  document.documentElement.dataset.unread = localStorage.getItem('tmail.unread') || 'bg'
+  document.documentElement.dataset.density = localStorage.getItem('tmail.density') || 'normal'
+} catch {}
 // Contacts take the place of the letter list; the calendar is shown when no letter is open.
 const crmMode = computed(() => crm.open && !mail.current && !mail.currentLoading)
-const calShown = computed(() => !crm.open && !mail.current && !mail.currentLoading)
-function showMail() { crm.open = false; mail.reading = false }
-function showCalendar() { closeMessage(); crm.open = false; mail.reading = true }
-function showCrm() { closeMessage(); crm.open = true; mail.reading = true }
+const homeShown = computed(() => home.open && !crm.open && !mail.current && !mail.currentLoading)
+const calShown = computed(() => !crm.open && !home.open && !mail.current && !mail.currentLoading)
+function showMail() { crm.open = false; home.open = false; mail.reading = false }
+function showHome() { closeMessage(); crm.open = false; home.open = true; mail.reading = true }
+function showCalendar() { closeMessage(); crm.open = false; home.open = false; mail.reading = true }
+function showCrm() { closeMessage(); crm.open = true; home.open = false; mail.reading = true }
 // Widths of the folder column and the letter list, dragged by the handles on their right edges.
 // Kept on the server for the user (the same on every computer), with a local copy for a fast start.
 const listW = ref(410)
@@ -73,6 +80,7 @@ async function start() {
     initNotify(s)
   }).catch(() => initNotify())
   loadFolders().catch(() => {})
+  loadLater()
   // The address says what to show (a link from a colleague or another browser); then it follows the screen.
   const router = useRouter()
   await applyQuery(router.currentRoute.value.query, true)
@@ -118,7 +126,8 @@ onBeforeUnmount(() => { disconnectEvents(); window.removeEventListener('keydown'
     </div>
     <div v-else-if="ready" class="app" :class="{ reading: mail.reading, 'side-open': mail.sideOpen, 'crm-mode': crmMode }" :style="{ '--list-w': listW + 'px', '--side-w': sideW + 'px' }">
       <nav class="rail" :aria-label="t('app.sections')">
-        <button class="rail-btn" :class="{ active: !crm.open || mail.current }" :aria-label="t('app.mail')" @click="showMail"><AppIcon name="mail" /><span class="tip">{{ t('app.mail') }}</span></button>
+        <button class="rail-btn" :class="{ active: homeShown }" :aria-label="t('home.title')" @click="showHome"><AppIcon name="home" /><span class="tip">{{ t('home.title') }}</span></button>
+        <button class="rail-btn" :class="{ active: !homeShown && !calShown && !crmMode }" :aria-label="t('app.mail')" @click="showMail"><AppIcon name="mail" /><span class="tip">{{ t('app.mail') }}</span></button>
         <button class="rail-btn" :class="{ active: calShown }" :aria-label="t('side.calendar')" @click="showCalendar"><AppIcon name="cal" /><span class="tip">{{ t('side.calendar') }}</span></button>
         <button class="rail-btn" :class="{ active: crmMode }" :aria-label="t('side.contacts')" @click="showCrm"><AppIcon name="users" /><span class="tip">{{ t('side.contacts') }}</span></button>
         <div class="spacer"></div>
@@ -135,6 +144,7 @@ onBeforeUnmount(() => { disconnectEvents(); window.removeEventListener('keydown'
       <MessageReader />
       <AttachmentPreview />
       <EventModal v-if="cal.editing" />
+      <CalendarModal v-if="cal.calEditing" />
       <FolderModal v-if="folders.edit" />
       <LabelModal v-if="labels.edit" />
     </div>

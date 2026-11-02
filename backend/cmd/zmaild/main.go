@@ -121,6 +121,10 @@ func main() {
 	go s.runMailboxPurge(ctx)
 	go s.runFolderExpiry(ctx)
 	go s.runSearchIndex(ctx)
+	go s.runCertNames(ctx)
+	go s.runSendPolicy(ctx)
+	go s.syncRelayConfig(ctx)
+	go s.runLater(ctx)
 	go spellCheck([]string{"проверка", "check"}) // load the dictionaries (a Russian and an English word) before the first letter
 	go conns.reap()
 	go func() { s.crmEnsureOwn(ctx); s.crmDedupe(ctx); s.crmResume(ctx) }()
@@ -159,6 +163,11 @@ func (s *Server) httpRedirect() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
 			acme.ServeHTTP(w, r)
+			return
+		}
+		// Thunderbird asks http://autoconfig.<domain> too; the MTA-STS policy is harmless over HTTP.
+		if isAutoconfigPath(r.URL.Path) || r.URL.Path == "/.well-known/mta-sts.txt" {
+			s.serveAutoSetup(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/internal/rspamd/") {

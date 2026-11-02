@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { confirmState, closeConfirm, secretState, closeSecret, copyText } from '~/composables/dialogs'
+import { confirmState, closeConfirm, secretState, closeSecret, copyText, choiceState, closeChoice } from '~/composables/dialogs'
 import { t } from '~/composables/i18n'
 const copied = ref(false)
 async function copy() { copied.value = await copyText(secretState.info?.secret || ''); setTimeout(() => copied.value = false, 2000) }
@@ -12,6 +12,13 @@ async function copy() { copied.value = await copyText(secretState.info?.secret |
     <template #foot>
       <button class="btn" @click="closeConfirm(false)">{{ t('common.cancel') }}</button>
       <button class="btn" :class="confirmState.danger ? 'danger solid' : 'primary'" @click="closeConfirm(true)">{{ confirmState.ok }}</button>
+    </template>
+  </AppModal>
+  <AppModal v-if="choiceState.open" :title="choiceState.title" width="460px" top @close="closeChoice(null)">
+    <p v-if="choiceState.text" style="margin:0;color:var(--ink-2);white-space:pre-line">{{ choiceState.text }}</p>
+    <template #foot>
+      <button class="btn" @click="closeChoice(null)">{{ t('common.cancel') }}</button>
+      <button v-for="c in choiceState.choices" :key="c.id" class="btn" :class="c.danger ? 'danger solid' : 'primary'" @click="closeChoice(c.id)">{{ c.label }}</button>
     </template>
   </AppModal>
   <AppModal v-if="secretState.open && secretState.info" :title="secretState.info.title" width="480px" @close="closeSecret">

@@ -70,6 +70,26 @@ TMail is designed around that:
 * Plus contact cards of companies and people built from the correspondence, so the whole team knows
   who a sender is, their company, tax ID and phones.
 
+## Phones, calendars, security
+
+* **Calendars and contacts on the phone.** CalDAV and CardDAV: calendars (your own and those shared
+  by colleagues) and contacts sync with iPhone, Android (DAVx⁵), macOS and Thunderbird. A calendar
+  can also be shared as a read-only ICS link for Google, Apple or Outlook Calendar. Events repeat.
+* **Mail programs set themselves up.** Thunderbird and Outlook find the server from the address
+  (autoconfig/autodiscover); each phone or program gets its own app password that can be revoked.
+* **Send later and snooze.** A letter can be sent at a chosen time by the server, even with the
+  browser closed; an incoming letter can be hidden until a time and come back to the top of the Inbox.
+* **Search across all folders**: Inbox, Sent, Drafts, Archive and your own folders at once.
+* **OpenPGP**: sign and encrypt letters, verify and decrypt incoming ones, correspondents' keys from
+  their letters (Autocrypt) or added by hand.
+* **Installable app (PWA)** that opens without a network; three list densities; a home page with
+  unread mail, the week's events and the latest files.
+* **Delivery security**: outgoing TLS checked by DANE and MTA-STS, an MTA-STS policy for incoming
+  mail, checks of the DKIM key, blocklists (Spamhaus and others) and certificate expiry.
+* **Mail server settings for the admin**: sending through an external SMTP relay, per-mailbox sending
+  limits against spam from a hijacked mailbox, and an encrypted export of the whole configuration to
+  move to another server.
+
 ## Requirements — light by design
 
 TMail is written to run on small servers. Every part is chosen and tuned for memory: the webmail
@@ -132,6 +152,11 @@ outside the server**: backups cannot be read without it.
 | `_dmarc.example.com` | TXT | `v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com` |
 | PTR of the server IP | | `mail.example.com` (at the hosting provider) |
 
+Recommended, not required: `autoconfig` and `autodiscover` CNAME → `mail.example.com` (mail programs
+set themselves up); `mta-sts` CNAME → `mail.example.com` and `_mta-sts` TXT `v=STSv1; id=…`; `_smtp._tls`
+TXT `v=TLSRPTv1; rua=mailto:postmaster@example.com`; a TLSA record for DANE only if the zone is signed
+with DNSSEC. **Domains** shows the exact values with copy buttons.
+
 The admin panel (**Domains**) checks every record live. The HTTPS certificate is issued
 automatically as soon as `mail.example.com` points to the server.
 
@@ -155,8 +180,9 @@ tmail domain add example.org && tmail dkim gen example.org && tmail dns example.
 ```
 
 Mail programs: IMAP `mail.example.com:993` (SSL/TLS) or POP3 `:995`; SMTP `:465` (SSL/TLS) or
-`:587` (STARTTLS); the login is the full address. Each user finds ready settings (and an iPhone/Mac
-profile) in the webmail settings.
+`:587` (STARTTLS); the login is the full address or an app password. Calendars and contacts:
+CalDAV/CardDAV at `https://mail.example.com/dav/`. Each user finds ready settings (and an iPhone/Mac
+profile with mail, calendars and contacts) in the webmail settings.
 
 ### Update
 

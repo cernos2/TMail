@@ -22,10 +22,14 @@ export default defineNuxtConfig({
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
         { name: 'theme-color', content: '#0A4FF5' },
         { name: 'robots', content: 'noindex, nofollow' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-title', content: 'TMAIL' },
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
         { rel: 'apple-touch-icon', href: '/icon-192.png' },
+        { rel: 'manifest', href: '/manifest.webmanifest' },
       ],
       // The data of the start screen is asked for while the scripts are still loading: the
       // account list, then each account's Inbox (see takePrefetched in api.ts). Plain "/" only.

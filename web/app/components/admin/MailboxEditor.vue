@@ -23,7 +23,14 @@ const form = reactive({
   autoPassword: true,
   password: '',
   grantUsers: [] as number[],
+  // Sending limits: the server-wide ones, own numbers, or none.
+  limitMode: props.mailbox?.limitHour == null && props.mailbox?.limitDay == null ? 'server'
+    : props.mailbox?.limitHour === 0 && props.mailbox?.limitDay === 0 ? 'none' : 'own',
+  limitHour: props.mailbox?.limitHour || 200,
+  limitDay: props.mailbox?.limitDay || 2000,
 })
+const limitBody = () => form.limitMode === 'server' ? { hour: null, day: null } : form.limitMode === 'none' ? { hour: 0, day: 0 }
+  : { hour: Math.max(1, Math.round(form.limitHour || 1)), day: Math.max(1, Math.round(form.limitDay || 1)) }
 // Who works with this mailbox: userId → rights.
 const access = reactive<Record<number, { canSend: boolean, personal: boolean } | undefined>>({})
 for (const u of props.mailbox?.users || []) access[u.id] = { canSend: u.canSend, personal: u.personal }
@@ -66,6 +73,7 @@ async function save() {
     } else {
       await adminApi(`/mailboxes/${props.mailbox.id}`, { method: 'PATCH', body: {
         name: form.name.trim(), quotaBytes: quotaBytes.value, active: form.active, signature: form.signature, template: form.template,
+        limits: limitBody(),
       } })
       await adminApi(`/mailboxes/${props.mailbox.id}/users`, { method: 'PUT', body: Object.entries(access)
         .filter(([, v]) => v).map(([id, v]) => ({ userId: Number(id), canSend: v!.canSend, personal: v!.personal })) })
@@ -171,6 +179,19 @@ async function toggleActive() {
             <span v-if="!accessCount" class="muted">{{ t('admin.mailboxes.nobody') }}</span>
             <button class="link" type="button" @click="tab = 'access'">{{ t('common.edit') }}</button>
           </div>
+        </div>
+        <div class="f lim">
+          <span style="font-size:13px;color:var(--ink-2);font-weight:500">{{ t('admin.mailboxes.sendLimit') }}</span>
+          <span class="seg" role="group" :aria-label="t('admin.mailboxes.sendLimit')">
+            <button type="button" :class="{ on: form.limitMode === 'server' }" @click="form.limitMode = 'server'">{{ t('admin.mailboxes.limitServer') }}</button>
+            <button type="button" :class="{ on: form.limitMode === 'own' }" @click="form.limitMode = 'own'">{{ t('admin.mailboxes.limitOwn') }}</button>
+            <button type="button" :class="{ on: form.limitMode === 'none' }" @click="form.limitMode = 'none'">{{ t('admin.mailboxes.limitNone') }}</button>
+          </span>
+          <div v-if="form.limitMode === 'own'" class="row2">
+            <label class="f">{{ t('admin.mailboxes.limitHour') }}<input v-model.number="form.limitHour" type="number" min="1" step="1" /></label>
+            <label class="f">{{ t('admin.mailboxes.limitDay') }}<input v-model.number="form.limitDay" type="number" min="1" step="1" /></label>
+          </div>
+          <span class="help">{{ t('admin.mailboxes.limitUsage', { hour: props.mailbox.sentHour || 0, day: props.mailbox.sentDay || 0 }) }}</span>
         </div>
         <div v-if="deleted" class="danger-zone del-zone">
           <span><b style="font-weight:600">{{ t('admin.mailboxes.deletedTitle') }}</b> {{ t('admin.mailboxes.deletedText', { by: props.mailbox.deletedBy, date: purgeDate }) }}</span>

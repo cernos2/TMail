@@ -117,6 +117,19 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, sess *Se
 			writeJSON(w, http.StatusOK, map[string]any{"folder": "", "messages": msgs, "hasMore": false})
 			return
 		}
+		// A search of the whole mailbox (every folder but Trash and Spam), newest first; "before"
+		// is then the date of the last letter shown (milliseconds), not a UID.
+		if text != "" && q.Get("scope") == "all" {
+			cursorIn, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+			msgs, cursor, err := s.searchEverywhere(r.Context(), c, acc.Address, text, base, cursorIn, limit)
+			if err != nil {
+				serverErr(w, "search everywhere", err)
+				return
+			}
+			s.attachSentBy(r.Context(), acc.Address, msgs)
+			writeJSON(w, http.StatusOK, map[string]any{"folder": "", "messages": msgs, "hasMore": cursor > 0, "cursor": cursor, "indexed": true})
+			return
+		}
 		if before == 1 {
 			writeJSON(w, http.StatusOK, map[string]any{"folder": folder, "messages": []Summary{}, "hasMore": false})
 			return
@@ -380,7 +393,11 @@ func summaryOf(m *imap.Message, account, folder string) Summary {
 		}
 	}
 	if m.BodyStructure != nil {
-		if atts := attachmentsOf(m.BodyStructure); len(atts) > 0 {
+		atts := attachmentsOf(m.BodyStructure)
+		if isPGPSigned(m.BodyStructure) || isPGPEncrypted(m.BodyStructure) {
+			atts = withoutPGPParts(atts) // the signature and the encrypted blob are not files
+		}
+		if len(atts) > 0 {
 			sm.HasAttachments, sm.Attachments = true, atts
 		}
 	}

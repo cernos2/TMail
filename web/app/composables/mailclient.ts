@@ -29,6 +29,52 @@ export function settingsText(address: string, name: string, password?: string) {
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 const uuid = () => (crypto as any).randomUUID ? crypto.randomUUID().toUpperCase() : `${Date.now()}-${Math.random()}`.toUpperCase()
 
+// Apple configuration profile with several mailboxes and, with an app password, the calendars and
+// counterparties (CalDAV, CardDAV) too: one file sets up the whole phone.
+export function deviceProfile(o: { title: string, login: string, password: string, boxes: { address: string, name: string }[], dav: boolean }) {
+  const s = (k: string, v: string) => `<key>${k}</key><string>${esc(v)}</string>`
+  const i = (k: string, v: number) => `<key>${k}</key><integer>${v}</integer>`
+  const b = (k: string, v: boolean) => `<key>${k}</key><${v}/>`
+  const base = `com.tmail.${MAIL_HOST.replace(/[^a-z0-9]/gi, '.')}.${o.login.replace(/[^a-z0-9]/gi, '.')}`
+  const payloads = o.boxes.map(x => [
+    s('PayloadType', 'com.apple.mail.managed'), s('PayloadIdentifier', `${base}.mail.${x.address.replace(/[^a-z0-9]/gi, '.')}`), s('PayloadUUID', uuid()), i('PayloadVersion', 1),
+    s('PayloadDisplayName', x.address), s('EmailAccountType', 'EmailTypeIMAP'), s('EmailAccountDescription', x.address),
+    s('EmailAccountName', x.name || x.address), s('EmailAddress', x.address),
+    s('IncomingMailServerHostName', MAIL_HOST), i('IncomingMailServerPortNumber', 993), b('IncomingMailServerUseSSL', true),
+    s('IncomingMailServerAuthentication', 'EmailAuthPassword'), s('IncomingMailServerUsername', x.address), s('IncomingPassword', o.password),
+    s('OutgoingMailServerHostName', MAIL_HOST), i('OutgoingMailServerPortNumber', 465), b('OutgoingMailServerUseSSL', true),
+    s('OutgoingMailServerAuthentication', 'EmailAuthPassword'), s('OutgoingMailServerUsername', x.address), s('OutgoingPassword', o.password),
+    b('OutgoingPasswordSameAsIncomingPassword', true),
+  ].join(''))
+  if (o.dav) {
+    const principal = `https://${MAIL_HOST}/dav/principals/${encodeURIComponent(o.login)}/`
+    payloads.push([s('PayloadType', 'com.apple.caldav.account'), s('PayloadIdentifier', base + '.caldav'), s('PayloadUUID', uuid()), i('PayloadVersion', 1),
+      s('PayloadDisplayName', t('devices.profileCalendars')), s('CalDAVAccountDescription', `${mail.me?.defaults?.org || 'TMAIL'} · ${t('devices.profileCalendars')}`),
+      s('CalDAVHostName', MAIL_HOST), i('CalDAVPort', 443), b('CalDAVUseSSL', true), s('CalDAVUsername', o.login), s('CalDAVPassword', o.password),
+      s('CalDAVPrincipalURL', principal)].join(''))
+    payloads.push([s('PayloadType', 'com.apple.carddav.account'), s('PayloadIdentifier', base + '.carddav'), s('PayloadUUID', uuid()), i('PayloadVersion', 1),
+      s('PayloadDisplayName', t('devices.profileContacts')), s('CardDAVAccountDescription', `${mail.me?.defaults?.org || 'TMAIL'} · ${t('devices.profileContacts')}`),
+      s('CardDAVHostName', MAIL_HOST), i('CardDAVPort', 443), b('CardDAVUseSSL', true), s('CardDAVUsername', o.login), s('CardDAVPassword', o.password),
+      s('CardDAVPrincipalURL', principal)].join(''))
+  }
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>PayloadContent</key><array>${payloads.map(p => `<dict>${p}</dict>`).join('')}</array>
+${s('PayloadType', 'Configuration')}${s('PayloadIdentifier', base + '.' + Date.now())}${s('PayloadUUID', uuid())}${i('PayloadVersion', 1)}
+${s('PayloadDisplayName', o.title)}${s('PayloadDescription', t('devices.profileDescription'))}${s('PayloadOrganization', mail.me?.defaults?.org || 'TMAIL')}
+</dict></plist>`
+  return new Blob([xml], { type: 'application/x-apple-aspen-config' })
+}
+
+export function downloadBlob(blob: Blob, name: string) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
+
 // Apple configuration profile (iPhone, iPad, Mac): opening it adds the account in one tap.
 // Without a password inside, the device asks for it while installing.
 export function mobileconfig(address: string, name: string, password?: string) {

@@ -9,6 +9,7 @@ import { toast, dismissToast } from './toast'
 import { linkify } from './linkify'
 import { labelById } from './labels'
 import { ACC_COLORS, longDate, displayName, fileSize } from './format'
+import { whenLabel, loadLater } from './later'
 
 export type Account = {
   address: string, name: string, canSend: boolean, personal: boolean,
@@ -24,7 +25,9 @@ export type Summary = {
   inReplyTo?: string, refs?: string[]
 }
 export type Attachment = { part: string, name: string, mime: string, size: number, inline: boolean, preview?: '' | 'image' | 'pdf' | 'text' | 'office', risk?: '' | 'exec' | 'macro' | 'html', embedded?: boolean }
+export type PgpStatus = { encrypted: boolean, decrypted: boolean, signed: boolean, verified: boolean, signer?: string, problem?: '' | 'nokey' | 'unknown' | 'bad' | 'broken' }
 export type FullMessage = Summary & {
+  pgp?: PgpStatus
   html: string, remoteImages: boolean, attachments: Attachment[], replyTo: Addr[],
   inReplyTo: string, references: string, spam: boolean, auth: Record<string, string>
   av?: string[] // antivirus findings: macro | encrypted | heuristic | spam | virus
@@ -42,6 +45,7 @@ export type Compose = {
   sourceAccount: string, sig: string, template: string,
   draftAccount: string, draftUid: number, savedAt: string, saveState: 'idle' | 'saving' | 'saved' | 'error', changed: number
   uploads: BigUpload[], links: BigFile[], // large files sent as links
+  pgpSign?: boolean, pgpEncrypt?: boolean, // OpenPGP: sign / encrypt when sending
 }
 export type BigFile = { token: string, url: string, thumb?: string, name: string, size: number, mime: string, expires: string }
 export type BigUpload = { id: number, name: string, size: number, loaded: number, error?: string, xhr?: XMLHttpRequest }
@@ -51,10 +55,12 @@ export const ROLE_NAMES: Record<string, string> = {
   get inbox() { return t('mail.folder.inbox') }, get flagged() { return t('mail.folder.flagged') },
   get drafts() { return t('mail.folder.drafts') }, get sent() { return t('mail.folder.sent') },
   get archive() { return t('mail.folder.archive') }, get junk() { return t('mail.folder.junk') },
-  get trash() { return t('mail.folder.trash') },
+  get trash() { return t('mail.folder.trash') }, get scheduled() { return t('mail.folder.scheduled') },
+  get snoozed() { return t('mail.folder.snoozed') },
 }
 export const ROLE_ICONS: Record<string, string> = {
   inbox: 'inbox', flagged: 'star', drafts: 'drafts', sent: 'sent', archive: 'archive', junk: 'junk', trash: 'trash',
+  scheduled: 'sendClock', snoozed: 'clock',
 }
 const PAGE = 50
 // Rows to show at once: a long conversation (38 letters from Ozon) is one row, so the list keeps
@@ -72,7 +78,7 @@ export const mail = reactive({
   listVeil: false, // a load the user asked for (folder, search, filter): the list is veiled
   loadingMore: false,
   listError: '',
-  filters: { q: '', since: '', until: '', unseen: false, att: false, sort: 'new' as 'new' | 'old' | 'from' | 'unread' },
+  filters: { q: '', since: '', until: '', unseen: false, att: false, here: false, sort: 'new' as 'new' | 'old' | 'from' | 'unread' },
   selected: null as string | null,
   current: null as FullMessage | null,
   // The open conversation: all its letters (oldest first, from Inbox/Sent/Archive), the earlier
@@ -110,6 +116,7 @@ export function accountColor(addr: string) {
 export const accountOf = (addr: string) => mail.me?.accounts.find(a => a.address === addr)
 
 export const viewTitle = computed(() => {
+  if (searchesEverywhere()) return mail.view.account ? `${t('mail.searchAll')} · ${mail.view.account}` : t('mail.searchAll')
   if (mail.view.label) return labelById(mail.view.label)?.name || t('mail.label')
   if (mail.view.folder) return mail.view.folder
   const r = ROLE_NAMES[mail.view.role] || t('mail.mail')
@@ -134,7 +141,7 @@ export function unseenFor(role: string, account?: string) {
 }
 
 export function resetFilters() {
-  Object.assign(mail.filters, { q: '', since: '', until: '', unseen: false, att: false })
+  Object.assign(mail.filters, { q: '', since: '', until: '', unseen: false, att: false, here: false })
   loadMessages()
 }
 // How many letters the open folder holds (from the folder counters), to explain an empty filtered list.
@@ -287,6 +294,10 @@ function scope(): string[] {
   return mail.view.account ? [mail.view.account] : (mail.me?.accounts.map(a => a.address) || [])
 }
 
+// A search goes through every folder of the mailbox (but Trash and Spam), like Gmail, unless the
+// user asked for this folder only; a label already spans folders.
+export const searchesEverywhere = () => !!mail.filters.q.trim() && !mail.filters.here && !mail.view.label
+
 function queryFor(account: string, before = 0, limit = PAGE) {
   const q: Record<string, string | number> = { account, limit }
   if (mail.view.label) q.label = mail.view.label
@@ -295,6 +306,7 @@ function queryFor(account: string, before = 0, limit = PAGE) {
   if (mail.view.role === 'flagged' && !mail.view.folder) q.flagged = '1'
   if (before) q.before = before
   if (mail.filters.q.trim()) q.q = mail.filters.q.trim()
+  if (searchesEverywhere()) q.scope = 'all'
   if (mail.filters.since) q.since = mail.filters.since
   if (mail.filters.until) q.until = mail.filters.until
   if (mail.filters.unseen) q.unseen = '1'
@@ -328,7 +340,9 @@ export async function loadMessages(again = false, quiet = false) {
     if (r.status === 'fulfilled') {
       msgs.push(...r.value.messages)
       const uids = r.value.messages.map(m => m.uid)
-      cursors[acc] = { before: uids.length ? Math.min(...uids) : 0, hasMore: r.value.hasMore }
+      // Across folders the next page is asked by date (the server's cursor), in one folder by UID.
+      const cur = (r.value as any).cursor
+      cursors[acc] = { before: cur !== undefined ? cur : uids.length ? Math.min(...uids) : 0, hasMore: r.value.hasMore }
     } else {
       failed.push(acc)
     }
@@ -373,7 +387,8 @@ async function loadPage(accs: string[], seq: number) {
       const have = new Set(mail.messages.map(keyOf))
       mail.messages.push(...r.messages.filter(m => !have.has(keyOf(m))))
       const uids = r.messages.map(m => m.uid)
-      mail.cursors[acc] = { before: uids.length ? Math.min(...uids) : mail.cursors[acc].before, hasMore: r.hasMore && uids.length > 0 }
+      const cur = (r as any).cursor
+      mail.cursors[acc] = { before: cur !== undefined ? cur : uids.length ? Math.min(...uids) : mail.cursors[acc].before, hasMore: r.hasMore && uids.length > 0 }
     })
     return true
   }
@@ -383,7 +398,7 @@ export function setView(v: { account?: string | null, role?: string, folder?: st
   if (mail.compose && !mail.composeModal) stashInlineReply()
   mail.view = { account: v.account ?? null, role: v.role ?? 'inbox', folder: v.folder ?? null, label: v.label ?? null }
   // Another folder starts unfiltered: a forgotten "Unread" filter made full folders look empty.
-  Object.assign(mail.filters, { q: '', since: '', until: '', unseen: false, att: false })
+  Object.assign(mail.filters, { q: '', since: '', until: '', unseen: false, att: false, here: false })
   mail.selected = null
   mail.current = null
   mail.reading = false
@@ -713,6 +728,8 @@ function composeForm(c: Compose, files: File[]) {
     fd.set('carryCids', serverCids.join(','))
   }
   if (c.draftUid) { fd.set('draftAccount', c.draftAccount); fd.set('draftUid', String(c.draftUid)) }
+  if (c.pgpSign) fd.set('pgpSign', '1')
+  if (c.pgpEncrypt) fd.set('pgpEncrypt', '1')
   for (const f of files) fd.append('files', f, f.name)
   return { fd, uploaded }
 }
@@ -950,7 +967,8 @@ function mentionsAttachment(c: Compose): string {
   return m && ATTACH_NOUN.test(m[0]) ? m[0].trim().replace(/\s+/g, ' ') : ''
 }
 
-export async function sendCompose() {
+// sendAt: "Send later" — the server keeps the letter in Scheduled and sends it at that time.
+export async function sendCompose(sendAt?: Date) {
   const c = mail.compose
   if (!c || c.sending) return
   c.error = ''
@@ -968,6 +986,24 @@ export async function sendCompose() {
   c.sending = true
   // Like Gmail: the window closes, the letter leaves in 15 s unless «Undo» brings it back.
   if (mail.compose === c) { mail.compose = null; mail.composeModal = false }
+  if (sendAt) {
+    try {
+      const fd = composeForm(c, c.files).fd
+      fd.append('sendAt', sendAt.toISOString())
+      const res = await api<{ account: string, folder: string, uid: number }>('/api/send', { method: 'POST', body: fd })
+      forgetParked(c)
+      toast(t('later.scheduledToast', { when: whenLabel(sendAt, true) }), { action: { label: t('common.open'), run: () => { setView({ role: 'scheduled' }); if (res.uid) openMessage({ account: res.account, folder: res.folder, uid: res.uid, seen: true } as Summary) } }, ms: 7000 })
+      loadLater()
+      refreshFoldersSoon(500)
+      if (mail.view.role === 'scheduled' || mail.view.role === 'drafts') loadMessages(false, true)
+    } catch (e: any) {
+      c.error = e instanceof ApiError ? e.message : t('mail.sendFailed')
+      c.sending = false
+      toast(t('mail.notSent', { error: c.error }), { kind: 'err', ms: 8000 })
+      await reopenCompose(c)
+    } finally { c.sending = false }
+    return
+  }
   if (await sendCountdown()) {
     c.sending = false
     await reopenCompose(c)
@@ -1067,6 +1103,8 @@ export function receiveNew(m: Summary): boolean {
 
 export async function logout() {
   try { await api('/api/auth/logout', { method: 'POST' }) } catch {}
+  // Copies of letters kept for offline use stay only while signed in.
+  try { navigator.serviceWorker?.controller?.postMessage('logout') } catch {}
   mail.me = null
   await navigateTo('/login')
 }

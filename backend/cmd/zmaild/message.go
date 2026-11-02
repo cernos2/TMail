@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/emersion/go-message/charset"
 	"html"
@@ -51,9 +52,10 @@ type FullMessage struct {
 	ReplyUID    string            `json:"replyUid,omitempty"`
 	Auth        map[string]string `json:"auth"` // spf/dkim/dmarc → pass|fail|none…
 	AV          []string          `json:"av"`   // antivirus warnings: macro | encrypted | heuristic | spam | virus
+	PGP         *pgpStatus        `json:"pgp,omitempty"`
 }
 
-var headerFields = []string{"Message-ID", "In-Reply-To", "References", "Reply-To", "Authentication-Results", "X-Spam", "X-TMAIL-Reply", "X-Virus"}
+var headerFields = []string{"Message-ID", "In-Reply-To", "References", "Reply-To", "Authentication-Results", "X-Spam", "X-TMAIL-Reply", "X-Virus", "Autocrypt"}
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, sess *Session) {
 	q := r.URL.Query()
@@ -97,6 +99,10 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, sess *Ses
 				if rf, ru, ok := strings.Cut(h.Get("X-TMAIL-Reply"), "|"); ok {
 					full.ReplyFolder, full.ReplyUID = rf, ru
 				}
+				// The correspondent's key, announced in the letter (only from a letter that passed DKIM).
+				if ac := h.Get("Autocrypt"); ac != "" && (full.Auth["dkim"] == "pass" || full.Auth["dmarc"] == "pass") {
+					go s.collectAutocrypt(context.Background(), full.From.Email, ac)
+				}
 			}
 		}
 		full.Bcc = []Addr{}
@@ -130,6 +136,10 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, sess *Ses
 				return
 			}
 			full.HTML = textToHTML(string(decodePart(raw, textPart.part.Encoding, textPart.part.Params["charset"])))
+		}
+
+		if isPGPSigned(bs) || isPGPEncrypted(bs) {
+			s.pgpInspect(r.Context(), c, acc, folder, uid, bs, &full)
 		}
 
 		wantText := q.Get("text") == "1"
@@ -342,6 +352,16 @@ func textForPreview(data []byte, cs string) string {
 
 func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request, sess *Session) {
 	q := r.URL.Query()
+	if n, ok := strings.CutPrefix(q.Get("part"), "pgp."); ok { // a file of a decrypted letter
+		idx, err1 := strconv.Atoi(n)
+		uid, err2 := strconv.ParseUint(q.Get("uid"), 10, 32)
+		if err1 != nil || err2 != nil {
+			writeErr(w, http.StatusBadRequest, "No attachment specified")
+			return
+		}
+		s.servePGPPart(w, r, sess, uint32(uid), idx)
+		return
+	}
 	path, ok := parsePath(q.Get("part"))
 	uid, err := strconv.ParseUint(q.Get("uid"), 10, 32)
 	if !ok || err != nil {
@@ -412,123 +432,126 @@ func (s *Server) servePart(w http.ResponseWriter, r *http.Request, sess *Session
 			return
 		}
 		data := decodeTransfer(raw, part.Encoding) // exact file bytes
-		if r.URL.Query().Get("as") == "scan" {
-			s.serveScan(w, r, data)
-			return
-		}
-		// Nothing of a file — download, preview, recognised text — before the antivirus has
-		// checked it. Only our own thumbnail picture is drawn right away.
-		as := r.URL.Query().Get("as")
-		if (as != "thumb" || previewKind(strings.ToLower(part.MIMEType+"/"+part.MIMESubType), partFilename(part)) != "image") &&
-			!s.avGate(w, r, sess, partFilename(part), data) {
-			return
-		}
-		if r.URL.Query().Get("as") == "text" {
-			name := partFilename(part)
-			if previewKind(strings.ToLower(part.MIMEType+"/"+part.MIMESubType), name) != "text" {
-				writeErr(w, http.StatusBadRequest, "This file cannot be shown as text")
-				return
-			}
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-			w.Header().Set("Cache-Control", "private, no-cache")
-			_, _ = io.WriteString(w, textForPreview(data, part.Params["charset"]))
-			return
-		}
-		mt := strings.ToLower(part.MIMEType + "/" + part.MIMESubType)
-		name := partFilename(part)
-		if as := r.URL.Query().Get("as"); as == "ocr" || as == "page" {
-			k := previewKind(mt, name)
-			if k != "image" && k != "pdf" {
-				writeErr(w, http.StatusBadRequest, "Text cannot be recognized in this file")
-				return
-			}
-			if k == "pdf" && !strings.HasSuffix(strings.ToLower(name), ".pdf") {
-				name += ".pdf"
-			}
-			if k == "image" && filepath.Ext(name) == "" {
-				name += map[string]string{"image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}[mt]
-				if filepath.Ext(name) == "" {
-					name += ".jpg"
-				}
-			}
-			if as == "page" {
-				n, _ := strconv.Atoi(r.URL.Query().Get("n"))
-				png, err := s.officePage(r.Context(), name, data, max(n, 1), 1600)
-				if err != nil {
-					writeErr(w, http.StatusUnprocessableEntity, "Could not show the page")
-					return
-				}
-				w.Header().Set("Content-Type", "image/png")
-				w.Header().Set("Cache-Control", "private, max-age=86400")
-				_, _ = w.Write(png)
-				return
-			}
-			out, err := s.officeRenderQ(r.Context(), "ocr", "", name, data)
-			if err != nil {
-				log.Printf("ocr %q: %v", name, err)
-				writeErr(w, http.StatusUnprocessableEntity, "Could not recognize the text")
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "private, max-age=86400")
-			_, _ = w.Write(out)
-			return
-		}
-		if r.URL.Query().Get("as") == "thumb" {
-			s.serveThumb(w, r, mt, name, data)
-			return
-		}
-		if r.URL.Query().Get("as") == "html" {
-			if previewKind(mt, name) != "sheet" {
-				writeErr(w, http.StatusBadRequest, "This file cannot be shown as a spreadsheet")
-				return
-			}
-			out, err := s.sheetHTML(r.Context(), name, data)
-			if err != nil {
-				log.Printf("sheet preview %q: %v", name, err)
-				writeErr(w, http.StatusUnprocessableEntity, "Could not prepare the spreadsheet preview. Download it instead")
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-			w.Header().Set("Cache-Control", "private, no-cache")
-			_, _ = w.Write(out)
-			return
-		}
-		if r.URL.Query().Get("as") == "pdf" {
-			if k := previewKind(mt, name); k != "office" && k != "sheet" {
-				writeErr(w, http.StatusBadRequest, "This document cannot be shown")
-				return
-			}
-			pdf, err := s.officeToPDF(r.Context(), name, data)
-			if err != nil {
-				log.Printf("office preview %q: %v", name, err)
-				writeErr(w, http.StatusUnprocessableEntity, "Could not prepare the document preview. Download it instead")
-				return
-			}
-			w.Header().Set("Content-Type", "application/pdf")
-			w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": strings.TrimSuffix(name, filepath.Ext(name)) + ".pdf"}))
-			w.Header().Set("Cache-Control", "private, max-age=3600")
-			w.Header().Set("Content-Length", strconv.Itoa(len(pdf)))
-			_, _ = w.Write(pdf)
-			return
-		}
-		if name == "" {
-			name = "attachment"
-		}
-		disp := "attachment"
-		if inlineSafe(mt) && !forceDownload {
-			disp = "inline"
-			w.Header().Set("Content-Type", mt)
-		} else {
-			w.Header().Set("Content-Type", "application/octet-stream")
-		}
-		w.Header().Set("Content-Disposition", mime.FormatMediaType(disp, map[string]string{"filename": name}))
-		w.Header().Set("Cache-Control", "private, max-age=3600")
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		_, _ = w.Write(data)
+		s.serveFile(w, r, sess, strings.ToLower(part.MIMEType+"/"+part.MIMESubType), partFilename(part), part.Params["charset"], data, forceDownload)
 	})
+}
+
+// serveFile answers with an attachment's bytes: download, inline view, preview conversions, all
+// after the antivirus check. Parts of decrypted letters (pgp.go) are served the same way.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, sess *Session, mt, name, charset string, data []byte, forceDownload bool) {
+	if r.URL.Query().Get("as") == "scan" {
+		s.serveScan(w, r, data)
+		return
+	}
+	// Nothing of a file — download, preview, recognised text — before the antivirus has
+	// checked it. Only our own thumbnail picture is drawn right away.
+	as := r.URL.Query().Get("as")
+	if (as != "thumb" || previewKind(mt, name) != "image") &&
+		!s.avGate(w, r, sess, name, data) {
+		return
+	}
+	if r.URL.Query().Get("as") == "text" {
+		if previewKind(mt, name) != "text" {
+			writeErr(w, http.StatusBadRequest, "This file cannot be shown as text")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+		w.Header().Set("Cache-Control", "private, no-cache")
+		_, _ = io.WriteString(w, textForPreview(data, charset))
+		return
+	}
+	if as := r.URL.Query().Get("as"); as == "ocr" || as == "page" {
+		k := previewKind(mt, name)
+		if k != "image" && k != "pdf" {
+			writeErr(w, http.StatusBadRequest, "Text cannot be recognized in this file")
+			return
+		}
+		if k == "pdf" && !strings.HasSuffix(strings.ToLower(name), ".pdf") {
+			name += ".pdf"
+		}
+		if k == "image" && filepath.Ext(name) == "" {
+			name += map[string]string{"image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}[mt]
+			if filepath.Ext(name) == "" {
+				name += ".jpg"
+			}
+		}
+		if as == "page" {
+			n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+			png, err := s.officePage(r.Context(), name, data, max(n, 1), 1600)
+			if err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, "Could not show the page")
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+			_, _ = w.Write(png)
+			return
+		}
+		out, err := s.officeRenderQ(r.Context(), "ocr", "", name, data)
+		if err != nil {
+			log.Printf("ocr %q: %v", name, err)
+			writeErr(w, http.StatusUnprocessableEntity, "Could not recognize the text")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		_, _ = w.Write(out)
+		return
+	}
+	if r.URL.Query().Get("as") == "thumb" {
+		s.serveThumb(w, r, mt, name, data)
+		return
+	}
+	if r.URL.Query().Get("as") == "html" {
+		if previewKind(mt, name) != "sheet" {
+			writeErr(w, http.StatusBadRequest, "This file cannot be shown as a spreadsheet")
+			return
+		}
+		out, err := s.sheetHTML(r.Context(), name, data)
+		if err != nil {
+			log.Printf("sheet preview %q: %v", name, err)
+			writeErr(w, http.StatusUnprocessableEntity, "Could not prepare the spreadsheet preview. Download it instead")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+		w.Header().Set("Cache-Control", "private, no-cache")
+		_, _ = w.Write(out)
+		return
+	}
+	if r.URL.Query().Get("as") == "pdf" {
+		if k := previewKind(mt, name); k != "office" && k != "sheet" {
+			writeErr(w, http.StatusBadRequest, "This document cannot be shown")
+			return
+		}
+		pdf, err := s.officeToPDF(r.Context(), name, data)
+		if err != nil {
+			log.Printf("office preview %q: %v", name, err)
+			writeErr(w, http.StatusUnprocessableEntity, "Could not prepare the document preview. Download it instead")
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": strings.TrimSuffix(name, filepath.Ext(name)) + ".pdf"}))
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		w.Header().Set("Content-Length", strconv.Itoa(len(pdf)))
+		_, _ = w.Write(pdf)
+		return
+	}
+	if name == "" {
+		name = "attachment"
+	}
+	disp := "attachment"
+	if inlineSafe(mt) && !forceDownload {
+		disp = "inline"
+		w.Header().Set("Content-Type", mt)
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disp, map[string]string{"filename": name}))
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
 }
 
 // ---------- HTML ----------

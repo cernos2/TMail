@@ -386,6 +386,20 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request, sess *Sessio
 			return
 		}
 	}
+	// OpenPGP: signed and/or encrypted (after the antivirus has seen the plain letter).
+	if in.ident == nil {
+		pgpRcpts := append(append(emails(in.to), emails(in.cc)...), emails(in.bcc)...)
+		wrapped, err := s.pgpWrap(r.Context(), msg, in.acc.Address, pgpRcpts, r.FormValue("pgpSign") == "1", r.FormValue("pgpEncrypt") == "1")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		msg = wrapped
+	}
+	if at := r.MultipartForm.Value["sendAt"]; len(at) > 0 && strings.TrimSpace(at[0]) != "" {
+		s.scheduleSend(w, r, sess, in, msg, msgID, strings.TrimSpace(at[0]))
+		return
+	}
 	acc := in.acc
 	rcpts := append(append(emails(in.to), emails(in.cc)...), emails(in.bcc)...)
 	var err2 error
@@ -689,6 +703,9 @@ func sendErrorText(err error) string {
 			return fmt.Sprintf("The address %s is temporarily not accepting mail. Try sending a little later.", addr)
 		}
 		return fmt.Sprintf("The server refused the address %s. The message was not sent. Check the address.", addr)
+	}
+	if i := strings.Index(e, "Sending limit reached"); i >= 0 {
+		return strings.TrimSpace(e[i:]) + "."
 	}
 	switch {
 	case strings.Contains(e, "552") || strings.Contains(low, "size"):

@@ -8,7 +8,7 @@ RUN apt-get update \
  && groupadd -g 5000 vmail && useradd -u 5000 -g vmail -d /var/vmail -s /usr/sbin/nologin vmail \
  && mkdir -p /var/vmail /etc/dovecot/sieve/before.d && chown vmail:vmail /var/vmail \
  && rm -rf /etc/dovecot/conf.d
-COPY dovecot.conf.tmpl dovecot-sql.conf.ext.tmpl /etc/dovecot/
+COPY dovecot.conf.tmpl dovecot-sql.conf.ext.tmpl dovecot-app.conf.ext.tmpl /etc/dovecot/
 COPY sieve/ /etc/dovecot/sieve/before.d/
 COPY decode2text.sh /usr/local/bin/decode2text.sh
 COPY entrypoint.sh /entrypoint.sh

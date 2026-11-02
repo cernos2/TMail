@@ -15,10 +15,11 @@ import (
 
 // Event is pushed to browsers over Server-Sent Events.
 type Event struct {
-	Type    string    `json:"type"` // new | counts | ping
-	Account string    `json:"account,omitempty"`
-	Message *Summary  `json:"message,omitempty"`
-	Event   *CalEvent `json:"event,omitempty"` // type "reminder"
+	Type    string            `json:"type"` // new | counts | ping
+	Account string            `json:"account,omitempty"`
+	Message *Summary          `json:"message,omitempty"`
+	Event   *CalEvent         `json:"event,omitempty"` // type "reminder"
+	Info    map[string]string `json:"info,omitempty"`  // type "scheduled": status, subject, error
 }
 
 type subscriber struct {

@@ -1,6 +1,19 @@
 <script setup lang="ts">
 const props = defineProps<{ name: string, fill?: boolean }>()
 const P: Record<string, string> = {
+  sendClock: '<path d="M21 3 13 21l-3-7-7-3z"/><circle cx="17.5" cy="17.5" r="4.5"/><path d="M17.5 15.6v2l1.3 1"/>',
+  phone: '<rect x="6.5" y="2" width="11" height="20" rx="2.2"/><path d="M11 18.5h2"/>',
+  laptop: '<rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+  lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>',
+  unlock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 7.7-1.5"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
+  rows: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  rowsDense: '<path d="M4 5h16M4 9.5h16M4 14h16M4 18.5h16"/>',
+  rowsLoose: '<path d="M4 7h16M4 17h16"/>',
+  install: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 8v6M9 11l3 3 3-3M8 21h8"/>',
+  signature: '<path d="M3 17c3-1 4-9 7-9 2 0-1 9 2 9 2 0 3-3 4-3s1 2 2 2h3"/><path d="M3 21h18"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
   sent: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',

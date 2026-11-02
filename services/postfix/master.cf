@@ -10,6 +10,7 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_end_of_data_restrictions=check_policy_service,inet:127.0.0.1:10040
   -o milter_macro_daemon_name=ORIGINATING
   -o cleanup_service_name=subcleanup
 submissions inet n      -       n       -       -       smtpd
@@ -21,6 +22,7 @@ submissions inet n      -       n       -       -       smtpd
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_end_of_data_restrictions=check_policy_service,inet:127.0.0.1:10040
   -o milter_macro_daemon_name=ORIGINATING
   -o cleanup_service_name=subcleanup
 # Strips the sender's own IP (Received: ... with ESMTPSA) from outgoing mail

@@ -3,7 +3,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { mail } from '~/composables/mail'
 import { cal, gridDays, eventsByDay, loadCalendar, shiftMonth, goToday, newEvent, toggleDone, planChanged, flushPlan,
-  dayKey, CAL_COLORS, type CalEvent } from '~/composables/calendar'
+  dayKey, CAL_COLORS, evKey, calName, setCalendarHidden, loadCalendars, type CalEvent } from '~/composables/calendar'
 import { t, fmtDate, monthNames, weekdayNames } from '~/composables/i18n'
 
 const todayKey = dayKey(new Date())
@@ -18,6 +18,8 @@ const upcoming = computed(() => {
 })
 const chipStyle = (e: CalEvent) => ({ background: CAL_COLORS[e.color]?.bg, color: CAL_COLORS[e.color]?.fg })
 const edit = (e: CalEvent) => { cal.editing = { ...e } }
+const newCalendar = () => { cal.calEditing = { name: '', color: 'green' } }
+const calColor = (c: string) => CAL_COLORS[c]?.bg
 const shortDate = (iso: string) => fmtDate(iso, { day: 'numeric', month: 'short' })
 const timeOf = (iso: string) => fmtDate(iso, { hour: '2-digit', minute: '2-digit' })
 // Grid days are local midnights; noon keeps the shown date right in a nearby time zone.
@@ -27,7 +29,7 @@ function addItem(list: 'goals' | 'tasks') { cal.plan[list].push({ text: '', done
 function removeItem(list: 'goals' | 'tasks', i: number) { cal.plan[list].splice(i, 1); planChanged() }
 function togglePlan() { cal.planOpen = !cal.planOpen; try { localStorage.setItem('tmail.planOpen', cal.planOpen ? '1' : '0') } catch {} }
 
-onMounted(loadCalendar)
+onMounted(() => { loadCalendars(); loadCalendar() })
 onBeforeUnmount(flushPlan)
 </script>
 
@@ -42,6 +44,20 @@ onBeforeUnmount(flushPlan)
       </span>
       <button v-if="!isThisMonth" class="btn sm" :title="t('calendar.backToThisMonth')" @click="goToday">{{ t('date.today') }}</button>
       <span class="grow"></span>
+      <ToolPop v-slot="{ close }" :title="t('calendar.calendars')" :label="t('calendar.calendars')" icon="cal" :down="true" align="right">
+        <div class="cals-pop">
+          <div v-for="c in cal.calendars" :key="c.id" class="cals-row">
+            <label class="check"><input type="checkbox" :checked="!c.hidden" @change="setCalendarHidden(c, !($event.target as HTMLInputElement).checked)" />
+              <i class="cals-dot" :style="{ background: calColor(c.color) }"></i><span class="cals-name">{{ calName(c) }}</span></label>
+            <AppIcon v-if="c.icsUrl" name="link" class="cals-flag" :title="t('calendar.icsPublished')" />
+            <AppIcon v-if="c.shares?.length" name="users" class="cals-flag" :title="t('calendar.sharedWith', { n: c.shares.length })" />
+            <AppIcon v-if="!c.canWrite" name="lock" class="cals-flag" :title="t('calendar.readOnly')" />
+            <button v-if="c.mine" type="button" class="icon-btn" :title="t('calendar.calendarSettings')" :aria-label="t('calendar.calendarSettings')" @click="close(); cal.calEditing = { ...c }"><AppIcon name="settings" /></button>
+          </div>
+          <div class="when-sep"></div>
+          <button type="button" class="tp-item" @click="close(); newCalendar()"><AppIcon name="plus" /> {{ t('calendar.newCalendar') }}</button>
+        </div>
+      </ToolPop>
       <button class="btn sm primary" @click="newEvent()"><AppIcon name="plus" />{{ t('calendar.event') }}</button>
       <button class="icon-btn" :class="{ on: cal.planOpen }" :title="cal.planOpen ? t('calendar.hidePlanner') : t('calendar.showPlanner')" :aria-label="t('calendar.planner')" @click="togglePlan"><AppIcon name="list" /></button>
     </header>
@@ -54,7 +70,7 @@ onBeforeUnmount(flushPlan)
              :class="{ out: d.getMonth() !== cal.month.getMonth(), we: i % 7 > 4, today: dayKey(d) === todayKey }"
              @click.self="newEvent(d)">
           <button type="button" class="cal-num" :title="t('calendar.newEventOn', { date: fmtDate(noon(d), { day: 'numeric', month: 'numeric', year: 'numeric' }) })" @click="newEvent(d)">{{ d.getDate() }}</button>
-          <button v-for="e in (eventsByDay[dayKey(d)] || []).slice(0, MAX)" :key="e.id" type="button" class="cal-chip" :class="{ done: e.done }"
+          <button v-for="e in (eventsByDay[dayKey(d)] || []).slice(0, MAX)" :key="evKey(e)" type="button" class="cal-chip" :class="{ done: e.done }"
                   :style="chipStyle(e)" :title="e.title" @click="edit(e)">
             <input v-if="e.isTask" type="checkbox" :checked="e.done" :aria-label="t('calendar.doneAria', { title: e.title })" @click.stop="toggleDone(e)" />
             <span v-if="!e.allDay" class="cal-chip-time">{{ timeOf(e.start) }}</span>
@@ -90,7 +106,7 @@ onBeforeUnmount(flushPlan)
         <section class="plan-box dates">
           <h3><AppIcon name="cal" />{{ t('calendar.upcoming') }}</h3>
           <p v-if="!upcoming.length" class="hint">{{ t('calendar.nothingPlanned') }}</p>
-          <button v-for="e in upcoming" :key="e.id" type="button" class="plan-ev" @click="edit(e)">
+          <button v-for="e in upcoming" :key="evKey(e)" type="button" class="plan-ev" @click="edit(e)">
             <i :style="{ background: CAL_COLORS[e.color]?.bg }"></i><b>{{ shortDate(e.start) }}{{ e.allDay ? '' : ' ' + timeOf(e.start) }}</b><span>{{ e.title }}</span>
           </button>
         </section>
@@ -103,7 +119,7 @@ onBeforeUnmount(flushPlan)
 
     <AppModal v-if="dayOpen" :title="fmtDate(noon(dayOpen), { day: 'numeric', month: 'long', weekday: 'long' })" width="420px" @close="dayOpen = null">
       <div class="day-list">
-        <button v-for="e in eventsByDay[dayKey(dayOpen)] || []" :key="e.id" type="button" class="cal-chip big" :class="{ done: e.done }" :style="chipStyle(e)" @click="edit(e); dayOpen = null">
+        <button v-for="e in eventsByDay[dayKey(dayOpen)] || []" :key="evKey(e)" type="button" class="cal-chip big" :class="{ done: e.done }" :style="chipStyle(e)" @click="edit(e); dayOpen = null">
           <span class="cal-chip-t">{{ e.title }}</span><span v-if="!e.allDay" class="cal-chip-time">{{ timeOf(e.start) }}</span>
         </button>
         <button class="btn sm" @click="newEvent(dayOpen!); dayOpen = null"><AppIcon name="plus" />{{ t('calendar.newEvent') }}</button>

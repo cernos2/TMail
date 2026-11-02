@@ -8,6 +8,7 @@ import { toast } from '~/composables/toast'
 import { SCHEMES, type Theme } from '~/composables/schemes'
 import { notifyState, requestNotifyPermission, testNotification } from '~/composables/notify'
 import { t } from '~/composables/i18n'
+import { pwa, installApp } from '~/composables/pwa'
 
 const props = defineProps<{ scheme: string, theme: Theme, tab?: string }>()
 const emit = defineEmits<{ close: [], scheme: [string], theme: [Theme], notify: ['notify' | 'notifyFiled' | 'notifyCalendar', boolean] }>()
@@ -16,6 +17,15 @@ const tab = ref(props.tab || 'look')
 // How unread letters stand out in the list (kept in this browser).
 const UNREAD = computed(() => [{ id: 'bg', name: t('settings.unreadBg') }, { id: 'bar', name: t('settings.unreadBar') }, { id: 'bold', name: t('settings.unreadBold') }])
 const unreadStyle = ref(document.documentElement.dataset.unread || 'bg')
+// How many letters fit on the screen (kept in this browser, like the unread style).
+const DENSITY = computed(() => [{ id: 'compact', name: t('settings.densityCompact'), icon: 'rowsDense' }, { id: 'normal', name: t('settings.densityNormal'), icon: 'rows' },
+  { id: 'comfortable', name: t('settings.densityComfortable'), icon: 'rowsLoose' }])
+const density = ref(document.documentElement.dataset.density || 'normal')
+function setDensity(v: string) {
+  density.value = v
+  document.documentElement.dataset.density = v
+  try { localStorage.setItem('tmail.density', v) } catch {}
+}
 function setUnreadStyle(v: string) {
   unreadStyle.value = v
   document.documentElement.dataset.unread = v
@@ -56,7 +66,8 @@ async function uploadBg(e: Event) {
         <button :class="{ on: tab === 'notify' }" role="tab" @click="tab = 'notify'">{{ t('settings.tabNotify') }}</button>
         <button :class="{ on: tab === 'templates' }" role="tab" @click="tab = 'templates'">{{ t('settings.tabTemplates') }}</button>
         <button :class="{ on: tab === 'autoreply' }" role="tab" @click="tab = 'autoreply'">{{ t('settings.tabAutoreply') }}</button>
-        <button :class="{ on: tab === 'clients' }" role="tab" @click="tab = 'clients'">{{ t('settings.tabClients') }}</button>
+        <button :class="{ on: tab === 'clients' }" role="tab" @click="tab = 'clients'">{{ t('settings.tabDevices') }}</button>
+        <button :class="{ on: tab === 'pgp' }" role="tab" @click="tab = 'pgp'">{{ t('settings.tabPgp') }}</button>
         <button :class="{ on: tab === 'mcp' }" role="tab" @click="tab = 'mcp'">{{ t('settings.tabMcp') }}</button>
         <button :class="{ on: tab === 'profile' }" role="tab" @click="tab = 'profile'">{{ t('settings.tabProfile') }}</button>
       </div>
@@ -74,6 +85,15 @@ async function uploadBg(e: Event) {
           <div class="row unread"><div class="row-main"><div class="row-from"><b>{{ t('settings.demoSender1') }}</b></div><div class="row-subj">{{ t('settings.demoSubject1') }}</div></div><div class="row-meta"><span class="row-time">12:40</span></div></div>
           <div class="row"><div class="row-main"><div class="row-from"><b>{{ t('settings.demoSender2') }}</b></div><div class="row-subj">{{ t('settings.demoSubject2') }}</div></div><div class="row-meta"><span class="row-time">11:02</span></div></div>
         </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <b style="font-weight:600">{{ t('settings.density') }}</b>
+          <span class="seg" role="group" :aria-label="t('settings.density')">
+            <button v-for="d in DENSITY" :key="d.id" :class="{ on: density === d.id }" style="display:inline-flex;align-items:center;gap:6px" @click="setDensity(d.id)"><AppIcon :name="d.icon" style="width:15px;height:15px" />{{ d.name }}</button>
+          </span>
+        </div>
+        <span class="hint">{{ t('settings.densityHint') }}</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <b style="font-weight:600">{{ t('settings.background') }}</b>
@@ -99,6 +119,14 @@ async function uploadBg(e: Event) {
           <span class="hint">{{ t('settings.imagesAlwaysFrom') }}</span>
           <span v-for="x in mail.me.imageSenders" :key="x" class="chip">{{ x }}<button type="button" class="x" :aria-label="t('settings.removeSender', { sender: x })" @click="setImagePrefs({ remove: x })"><AppIcon name="close" /></button></span>
         </div>
+      </div>
+      <div class="app-install">
+        <span class="ai-ico"><AppIcon name="install" /></span>
+        <div>
+          <b>{{ t('settings.appTitle') }}</b>
+          <span class="hint">{{ pwa.installed ? t('settings.appInstalled') : pwa.ios ? t('settings.appIos') : pwa.installable ? t('settings.appHint') : t('settings.appMenu') }}</span>
+        </div>
+        <button v-if="pwa.installable && !pwa.installed" class="btn primary sm" @click="installApp"><AppIcon name="install" />{{ t('settings.appInstall') }}</button>
       </div>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <b style="font-weight:600">{{ t('settings.theme') }}</b>
@@ -126,11 +154,9 @@ async function uploadBg(e: Event) {
 
     <ProfileSettings v-else-if="tab === 'profile'" />
     <McpSettings v-else-if="tab === 'mcp'" />
+    <PgpSettings v-else-if="tab === 'pgp'" />
 
-    <div v-else-if="tab === 'clients'" style="display:flex;flex-direction:column;gap:12px">
-      <p class="hint" style="margin:0">{{ t('settings.clientsHint') }}</p>
-      <MailClientCard v-for="a in mail.me?.accounts || []" :key="a.address" :address="a.address" :name="a.name" />
-    </div>
+    <DevicesSettings v-else-if="tab === 'clients'" />
 
     <TemplateSettings v-else-if="tab === 'templates'" />
 
@@ -174,6 +200,11 @@ async function uploadBg(e: Event) {
 /* All tabs visible: they wrap onto a second line instead of hiding behind the edge. */
 .tabs{flex-wrap:wrap;overflow:visible}
 .img-senders{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.app-install{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
+.app-install > div{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.app-install .hint{font-size:12.5px}
+.ai-ico{width:36px;height:36px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none}
+.ai-ico svg{width:19px;height:19px}
 .ntf-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
 .ntf-row > div{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .ntf-row .hint{font-size:12.5px}

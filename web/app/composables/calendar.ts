@@ -8,7 +8,17 @@ import { t, fmtDate, monthNames, weekdayNames, i18n } from './i18n'
 export type CalEvent = {
   id: number, title: string, notes: string, start: string, end?: string | null, allDay: boolean,
   color: string, isTask: boolean, done: boolean, remindMinutes?: number | null, mailRef?: string,
+  calendarId?: number, rrule?: string, occurrence?: string | null, canEdit?: boolean,
+  seriesStart?: string | null, seriesEnd?: string | null,
 }
+// A calendar the user sees: own ones and colleagues' shared with them.
+export type Calendar = {
+  id: number, name: string, color: string, mine: boolean, canWrite: boolean, hidden: boolean, owner: string,
+  icsUrl?: string, shares?: { userId: number, login: string, name: string, canWrite: boolean }[], davPath: string,
+}
+// Repeat choices of the event form (iCalendar rules); a phone may set any other rule, shown as such.
+export const REPEATS = ['', 'FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'FREQ=WEEKLY', 'FREQ=MONTHLY', 'FREQ=YEARLY']
+export const evKey = (e: CalEvent) => `${e.id}|${e.occurrence || ''}`
 export type PlanItem = { text: string, done: boolean }
 export type Plan = { goals: PlanItem[], tasks: PlanItem[], notes: string }
 
@@ -44,7 +54,39 @@ export const cal = reactive({
   editing: null as null | Partial<CalEvent>,
   planOpen: true,
   reminders: [] as CalEvent[], // shown until confirmed; the server repeats them every 5 minutes
+  calendars: [] as Calendar[],
+  calEditing: null as null | Partial<Calendar>,
 })
+
+export const calName = (c?: Calendar) => !c ? '' : (c.name || t('calendar.personal')) + (c.mine ? '' : ` · ${c.owner}`)
+export const writableCalendars = () => cal.calendars.filter(c => c.canWrite)
+
+export async function loadCalendars() {
+  try { cal.calendars = (await api<{ calendars: Calendar[] }>('/api/calendars')).calendars } catch {}
+}
+
+export async function saveCalendar(c: Partial<Calendar> & { shares?: Calendar['shares'], ics?: boolean, rotate?: boolean }) {
+  const body: Record<string, any> = { name: c.name, color: c.color }
+  if (c.shares) body.shares = c.shares
+  if (c.ics !== undefined) body.ics = c.ics
+  if (c.rotate) body.rotate = true
+  const r = c.id ? await api<{ icsUrl?: string }>(`/api/calendars/${c.id}`, { method: 'PUT', body })
+    : await api<{ id: number }>('/api/calendars', { method: 'POST', body })
+  await loadCalendars()
+  return r
+}
+
+export async function setCalendarHidden(c: Calendar, hidden: boolean) {
+  c.hidden = hidden
+  try { await api(`/api/calendars/${c.id}`, { method: 'PUT', body: { hidden } }); loadCalendar() }
+  catch (e: any) { c.hidden = !hidden; toast(e.message, { kind: 'err' }) }
+}
+
+export async function deleteCalendar(c: Calendar) {
+  await api(`/api/calendars/${c.id}`, { method: 'DELETE' })
+  await loadCalendars()
+  loadCalendar()
+}
 try { cal.planOpen = localStorage.getItem('tmail.planOpen') !== '0' } catch {}
 
 export const p2 = (n: number) => String(n).padStart(2, '0')
@@ -76,6 +118,7 @@ export const eventsByDay = computed(() => {
 
 let loadSeq = 0
 export async function loadCalendar() {
+  if (!cal.calendars.length) loadCalendars()
   const seq = ++loadSeq
   const days = gridDays.value
   const from = days[0]
@@ -116,24 +159,32 @@ export function newEvent(day?: Date, extra: Partial<CalEvent> = {}) {
 }
 
 export async function saveEvent(e: Partial<CalEvent>) {
-  const body = { ...e, remindMinutes: e.remindMinutes ?? null, end: e.end || null }
+  const { occurrence: _o, canEdit: _c, ...rest } = e
+  const body = { ...rest, remindMinutes: e.remindMinutes ?? null, end: e.end || null, rrule: e.rrule || '' }
   const saved = e.id
     ? await api<CalEvent>(`/api/calendar/events/${e.id}`, { method: 'PUT', body })
     : await api<CalEvent>('/api/calendar/events', { method: 'POST', body })
+  // A repeating event (or one that stopped repeating) changes many days: read the month again.
+  if (saved.rrule || e.rrule || cal.events.some(x => x.id === saved.id && x.occurrence)) { loadCalendar(); return saved }
   const i = cal.events.findIndex(x => x.id === saved.id)
   if (i >= 0) cal.events[i] = saved
   else cal.events.push(saved)
   return saved
 }
 
-export async function deleteEvent(id: number) {
-  await api(`/api/calendar/events/${id}`, { method: 'DELETE' })
-  cal.events = cal.events.filter(e => e.id !== id)
+// occurrence: delete only this repetition of a repeating event.
+export async function deleteEvent(id: number, occurrence?: string | null) {
+  await api(`/api/calendar/events/${id}`, { method: 'DELETE', query: occurrence ? { occurrence } : undefined })
+  cal.events = cal.events.filter(e => e.id !== id || (occurrence && e.occurrence !== occurrence))
 }
 
 export async function toggleDone(e: CalEvent) {
+  if (e.canEdit === false) return
   e.done = !e.done
-  try { await saveEvent(e) } catch (err: any) { e.done = !e.done; toast(err.message, { kind: 'err' }) }
+  // A repetition carries its own date: the series keeps the start it has.
+  const series = e.occurrence ? cal.events.find(x => x.id === e.id && !x.occurrence) : null
+  const body = e.occurrence ? { ...e, start: series?.start || e.start, end: series ? series.end : e.end } : e
+  try { await saveEvent(body) } catch (err: any) { e.done = !e.done; toast(err.message, { kind: 'err' }) }
 }
 
 // Planner page autosaves a moment after the last change.

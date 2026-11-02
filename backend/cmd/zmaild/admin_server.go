@@ -92,6 +92,8 @@ type dnsCheck struct {
 	Expected string `json:"expected"`
 	Found    string `json:"found"`
 	Hint     string `json:"hint"`
+	Group    string `json:"group"`    // mail (needed to send and receive) | security | setup
+	Optional bool   `json:"optional"` // a recommendation: missing is not an error
 }
 
 // resolver asks our own validating Unbound, not the provider's resolver.
@@ -103,7 +105,7 @@ func (s *Server) resolver() *net.Resolver {
 }
 
 func (s *Server) checkDomainDNS(ctx context.Context, domain string) []dnsCheck {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	res := s.resolver()
 	host := s.cfg.Hostname
@@ -220,7 +222,10 @@ func (s *Server) checkDomainDNS(ctx context.Context, domain string) []dnsCheck {
 		}
 		add(ptr)
 	}
-	return out
+	for i := range out {
+		out[i].Group = "mail"
+	}
+	return append(out, s.moreDomainChecks(ctx, domain, selector, pub)...)
 }
 
 func contains(list []string, v string) bool {

@@ -619,7 +619,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .copy:hover{border-color:var(--accent-line);color:var(--accent)}
 .form{display:flex;flex-direction:column;gap:14px}
 .form .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.form label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2);font-weight:500}
+.form label.f,.form div.f{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2);font-weight:500}
 .form input[type=text],.form input[type=password],.form input[type=number],.form input[type=email],.form input[type=tel],.form input[type=date],.form input[type=time],.form input[type=search],.form select,.form textarea{height:38px;border:1px solid var(--line);border-radius:4.5px;padding:0 10px;background:var(--surface-2);font-size:14px;font-weight:400;color:var(--ink);min-width:0;width:100%}
 .form textarea{height:auto;min-height:110px;padding:10px;line-height:1.5;resize:vertical;font-family:inherit}
 .form input[type=date],.form input[type=time]{color-scheme:light dark}
@@ -1172,3 +1172,61 @@ html[data-bg][data-theme=dark] body{--bg-dim:rgba(4,8,14,.5)}
 html[dir="rtl"] :is(.list, .reader, .calv, .crm, .crm-body, .t-item) :is(div, span, b, strong, p, a, li, h1, h2, h3, td),
 html[dir="rtl"] :is(textarea, input:not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]),
 html[dir="rtl"] .side :is(div, span, b, small, a){unicode-bidi:plaintext}
+/* Send + "Send later" joined into one button. */
+.send-split{display:inline-flex;align-items:stretch}
+.send-split > .btn.primary{border-top-right-radius:0;border-bottom-right-radius:0}
+.send-split .tp > .tb-btn{height:100%;min-height:34px;width:34px;border-radius:0 4.5px 4.5px 0;background:var(--accent);color:var(--accent-ink);border-left:1px solid color-mix(in srgb,#000 18%,var(--accent))}
+.send-split .tp > .tb-btn:hover,.send-split .tp > .tb-btn.on{background:color-mix(in srgb,#000 12%,var(--accent));color:var(--accent-ink)}
+.send-split .tp > .tb-btn svg{width:17px;height:17px}
+/* Scheduled / snoozed rows: when the letter leaves or comes back instead of its date. */
+.row-time.when-tag{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-weight:600;white-space:nowrap}
+.row-time.when-tag svg{width:13px;height:13px}
+.row-time.when-tag.bad{color:var(--danger)}
+.row-hover .tp > .tb-btn{width:26px;height:26px}
+.row-hover .tp > .tb-btn svg{width:15px;height:15px}
+.row-hover:has(.tb-btn.on){display:flex}
+.notice.later-note{flex-wrap:wrap;align-items:center;background:var(--accent-soft);border-color:transparent}
+.notice.later-note.danger{background:var(--danger-soft,#fdecea)}
+.later-note .ln-btns{display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.later-note .ln-btns .tp > .tb-btn{height:30px;border:1px solid var(--line);background:var(--surface);border-radius:4.5px;padding:0 10px}
+.seg.sm button{height:28px;padding:0 10px;font-size:12.5px}
+/* Calendars list in the calendar header. */
+.cals-pop{min-width:280px;display:flex;flex-direction:column;gap:2px}
+.cals-row{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;border-radius:4px}
+.cals-row:hover{background:var(--surface-3)}
+.cals-row .check{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer}
+.cals-dot{width:10px;height:10px;border-radius:50%;flex:none}
+.cals-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cals-flag{width:14px;height:14px;color:var(--ink-3);flex:none}
+.cals-row .icon-btn{width:28px;height:28px}
+.cals-row .icon-btn svg{width:15px;height:15px}
+.cals-pop .tp-item{display:flex;align-items:center;gap:8px}
+.cals-pop .tp-item svg{width:15px;height:15px}
+.cal-chip-rep{width:11px;height:11px;flex:none;opacity:.7;margin-left:auto}
+.cals-pop .when-sep{height:1px;background:var(--line);margin:4px 6px}
+/* List density (Settings → Look): compact fits about twice as many letters, comfortable gives air. */
+html[data-density="compact"] .row{padding:5px 12px;gap:8px;grid-template-columns:26px 1fr auto;align-items:center}
+html[data-density="compact"] .row-pick{width:26px;height:26px}
+html[data-density="compact"] .row-pick .avatar{width:26px!important;height:26px!important;font-size:10.5px!important}
+html[data-density="compact"] .row-cb{inset:4px;width:18px;height:18px}
+html[data-density="compact"] .row-main{flex-direction:row;align-items:baseline;gap:10px}
+html[data-density="compact"] .row-from{flex:0 0 clamp(110px,32%,220px)}
+html[data-density="compact"] .row-subj{flex:0 1 auto;max-width:55%}
+html[data-density="compact"] .row-prev{flex:1 1 0;min-width:0}
+html[data-density="compact"] .row-files,html[data-density="compact"] .tags{display:none}
+html[data-density="compact"] .row-meta{flex-direction:row;align-items:center;gap:8px}
+html[data-density="comfortable"] .row{padding:16px 16px;gap:12px}
+html[data-density="comfortable"] .row-main{gap:4px}
+html[data-density="comfortable"] .row-prev{-webkit-line-clamp:2;display:-webkit-box;-webkit-box-orient:vertical;white-space:normal}
+.density-demo{display:flex;gap:10px;flex-wrap:wrap}
+.dns-row .st.optional{background:var(--surface-3);color:var(--ink-3)}
+.dns-group{padding:16px 16px 4px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.dns-group h3{margin:0;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);display:flex;gap:10px;align-items:baseline}
+.dns-group h3 .hint{font-weight:500;letter-spacing:0;text-transform:none}
+.dns-group p{margin:2px 0 8px;font-size:12.5px}
+.tb-btn.pgp-btn.on{color:var(--ok);background:var(--ok-soft)}
+.tb-btn.pgp-btn:disabled{opacity:.4;cursor:not-allowed}
+.badge.pgp{background:var(--ok-soft);color:var(--ok)}
+.badge.pgp.warn{background:var(--warn-soft);color:var(--warn)}
+.badge.pgp.bad{background:var(--danger-soft);color:var(--danger)}
+.tag.folder-tag{display:inline-flex;align-items:center;gap:4px}.tag.folder-tag svg{width:12px;height:12px}

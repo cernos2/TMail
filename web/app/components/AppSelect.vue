@@ -4,7 +4,7 @@
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 
 type Opt = { value: string | number, label: string, hint?: string }
-const props = defineProps<{ modelValue: string | number, options: Opt[], id?: string, ariaLabel?: string, bare?: boolean, small?: boolean, searchable?: boolean }>()
+const props = defineProps<{ modelValue: string | number, options: Opt[], id?: string, ariaLabel?: string, bare?: boolean, small?: boolean, searchable?: boolean, disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [string | number] }>()
 
 const btn = ref<HTMLButtonElement | null>(null)
@@ -32,6 +32,7 @@ function place() {
 }
 async function show() {
   if (open.value) { hide(); return }
+  if (props.disabled) return
   query.value = ''
   active.value = Math.max(0, props.options.findIndex(o => o.value === props.modelValue))
   open.value = true
@@ -74,7 +75,7 @@ onBeforeUnmount(hide)
 </script>
 
 <template>
-  <button :id="props.id" ref="btn" type="button" class="sel" :class="{ bare: props.bare, sm: props.small, open }"
+  <button :id="props.id" ref="btn" type="button" class="sel" :disabled="props.disabled" :class="{ bare: props.bare, sm: props.small, open }"
           aria-haspopup="listbox" :aria-expanded="open" :aria-controls="uid" :aria-label="props.ariaLabel"
           @click="show" @keydown="onKey">
     <span class="sel-val">{{ current?.label ?? '—' }}</span>

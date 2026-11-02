@@ -89,11 +89,16 @@ type Folder struct {
 	Total  uint32 `json:"total"`
 }
 
-var roleOrder = map[string]int{"inbox": 0, "drafts": 1, "sent": 2, "archive": 3, "junk": 4, "trash": 5, "": 6}
+var roleOrder = map[string]int{"inbox": 0, "snoozed": 1, "drafts": 2, "scheduled": 3, "sent": 4, "archive": 5, "junk": 6, "trash": 7, "": 8}
 
 func roleOf(info *imap.MailboxInfo) string {
-	if strings.EqualFold(info.Name, "INBOX") {
+	switch {
+	case strings.EqualFold(info.Name, "INBOX"):
 		return "inbox"
+	case info.Name == scheduledFolder:
+		return "scheduled"
+	case info.Name == snoozedFolder:
+		return "snoozed"
 	}
 	for _, a := range info.Attributes {
 		switch a {

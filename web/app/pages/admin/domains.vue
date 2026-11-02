@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { translateServer } from '~/composables/servermsg'
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { adminApi } from '~/composables/admin'
 import { toast } from '~/composables/toast'
 import { confirmDialog, copyText } from '~/composables/dialogs'
@@ -46,7 +46,19 @@ async function removeDomain(d: any) {
   try { await adminApi(`/domains/${d.id}`, { method: 'DELETE' }); toast(t('admin.domains.deleted')); sel.value = null; await load() }
   catch (e: any) { toast(e.message, { kind: 'err' }) }
 }
-const okCount = (checks: any[]) => checks.filter(c => c.status === 'ok').length
+// Required checks decide the summary; recommendations are counted apart.
+const okCount = (checks: any[]) => checks.filter(c => !c.optional && c.status === 'ok').length
+const required = (checks: any[]) => checks.filter(c => !c.optional).length
+const GROUPS = computed(() => [
+  { id: 'mail', title: t('admin.domains.groupMail'), desc: t('admin.domains.groupMailDesc') },
+  { id: 'security', title: t('admin.domains.groupSecurity'), desc: t('admin.domains.groupSecurityDesc') },
+  { id: 'setup', title: t('admin.domains.groupSetup'), desc: t('admin.domains.groupSetupDesc') },
+])
+const inGroup = (g: string) => (dns.value?.checks || []).filter((c: any) => (c.group || 'mail') === g)
+const recCount = (g: string) => inGroup(g).filter((c: any) => c.status === 'ok').length
+const pillOf = (c: any) => c.status === 'ok' ? { cls: 'pill ok', text: t('admin.domains.statusOk') }
+  : c.optional && c.status === 'missing' ? { cls: 'pill', text: t('admin.domains.statusRecommended') }
+  : { cls: 'pill bad', text: c.status === 'missing' ? t('admin.domains.statusMissing') : t('admin.domains.statusWrong') }
 </script>
 
 <template>
@@ -67,25 +79,30 @@ const okCount = (checks: any[]) => checks.filter(c => c.status === 'ok').length
       <LoadingVeil :show="checking" :text="t('admin.domains.checkingDns')" />
       <div class="card-head">
         <h2>{{ t('admin.domains.dnsRecords', { domain: dns?.domain || '' }) }}</h2>
-        <span v-if="dns" :class="okCount(dns.checks) === dns.checks.length ? 'pill ok' : 'pill bad'">{{ t('admin.domains.okOf', { ok: okCount(dns.checks), total: dns.checks.length }) }}</span>
+        <span v-if="dns" :class="okCount(dns.checks) === required(dns.checks) ? 'pill ok' : 'pill bad'">{{ t('admin.domains.okOf', { ok: okCount(dns.checks), total: required(dns.checks) }) }}</span>
         <button class="btn sm" :disabled="checking" @click="check"><AppIcon name="refresh" />{{ checking ? t('admin.domains.checking') : t('admin.domains.checkAgain') }}</button>
       </div>
       <div v-if="!dns" class="empty-card" style="min-height:200px"></div>
       <template v-else>
-        <div v-if="okCount(dns.checks) < dns.checks.length" class="notice" style="margin:12px 16px 0">
+        <div v-if="dns.checks.some((c: any) => c.status !== 'ok')" class="notice" style="margin:12px 16px 0">
           <AppIcon name="info" />
           <span>{{ t('admin.domains.whereToAdd') }}</span>
         </div>
-        <div v-for="c in dns.checks" :key="c.key" class="dns-row">
-          <span class="st" :class="c.status"><AppIcon :name="c.status === 'ok' ? 'check' : 'close'" /></span>
+        <template v-for="g in GROUPS" :key="g.id">
+        <div v-if="inGroup(g.id).length" class="dns-group">
+          <h3>{{ g.title }}<span class="hint">{{ recCount(g.id) }}/{{ inGroup(g.id).length }}</span></h3>
+          <p class="hint">{{ g.desc }}</p>
+        </div>
+        <div v-for="c in inGroup(g.id)" :key="c.key" class="dns-row">
+          <span class="st" :class="c.optional && c.status === 'missing' ? 'optional' : c.status"><AppIcon :name="c.status === 'ok' ? 'check' : c.optional && c.status === 'missing' ? 'info' : 'close'" /></span>
           <div style="min-width:0">
             <h3>{{ translateServer(c.title) }}
-              <span :class="c.status === 'ok' ? 'pill ok' : 'pill bad'">{{ c.status === 'ok' ? t('admin.domains.statusOk') : c.status === 'missing' ? t('admin.domains.statusMissing') : t('admin.domains.statusWrong') }}</span></h3>
+              <span :class="pillOf(c).cls">{{ pillOf(c).text }}</span></h3>
             <p v-if="c.hint" class="hint">{{ translateServer(c.hint) }}</p>
             <dl class="rec">
               <dt>{{ t('admin.domains.recType') }}</dt><dd><code>{{ c.type }}</code></dd>
               <dt>{{ t('admin.domains.recName') }}</dt><dd><code>{{ c.name }}</code><button v-if="c.name !== '—'" class="copy" @click="copy(c.name)">{{ t('common.copy') }}</button></dd>
-              <template v-if="c.status !== 'ok'">
+              <template v-if="c.status !== 'ok' && c.expected">
                 <dt>{{ t('admin.domains.recExpected') }}</dt><dd><code>{{ c.expected }}</code><button v-if="c.expected && c.expected !== '—'" class="copy" @click="copy(c.expected)">{{ t('common.copy') }}</button></dd>
               </template>
               <template v-if="c.found">
@@ -94,6 +111,7 @@ const okCount = (checks: any[]) => checks.filter(c => c.status === 'ok').length
             </dl>
           </div>
         </div>
+        </template>
       </template>
       <div class="drawer-foot" v-if="domains.find(d => d.id === sel)">
         <span class="hint">{{ t('admin.domains.dkimSelector', { selector: domains.find(d => d.id === sel)?.dkimSelector || '—' }) }}</span>

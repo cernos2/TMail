@@ -1,0 +1,8 @@
+# App passwords (one per phone or mail program, revocable in the webmail settings).
+# The first 8 characters of the typed password find the row; the hash checks the rest.
+driver = pgsql
+connect = host=127.0.0.1 dbname=zmail user=mta_ro password=${MTA_DB_PASSWORD}
+default_pass_scheme = BLF-CRYPT
+
+password_query = SELECT "user", password, userdb_home, userdb_uid, userdb_gid, userdb_quota_rule \
+  FROM mta.app_login('%u', '%8w', '%s', '%r')

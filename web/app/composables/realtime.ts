@@ -4,6 +4,7 @@ import { mail, receiveNew, refreshFoldersSoon, loadMessages, openMessage, setVie
 import { notifyNew, notifyFiled } from './notify'
 import { showReminder, dropReminder, type CalEvent } from './calendar'
 import { api } from './api'
+import { onScheduledEvent } from './later'
 
 let es: EventSource | null = null
 let readyOnce = false
@@ -39,6 +40,9 @@ export function connectEvents() {
         break
       case 'counts':
         refreshFoldersSoon(500)
+        break
+      case 'scheduled': // a scheduled letter left, or could not
+        onScheduledEvent((ev as any).info || {})
         break
     }
   }

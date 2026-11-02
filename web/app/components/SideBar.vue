@@ -4,6 +4,7 @@ import { mail, setView, unseenFor, totalFor, fmtCount, accountColor, startCompos
 import { SCHEMES } from '~/composables/schemes'
 import { folders, newFolder, editFolder, ruleOf, loadRules } from '~/composables/folders'
 import { crm } from '~/composables/crm'
+import { home } from '~/composables/home'
 import { labels, loadLabels, LABEL_COLORS } from '~/composables/labels'
 import { t, num } from '~/composables/i18n'
 import { onMounted } from 'vue'
@@ -12,16 +13,18 @@ import { watch } from 'vue'
 const emit = defineEmits<{ look: [] }>()
 const props = defineProps<{ scheme: string }>()
 
-const ROLES = ['inbox', 'flagged', 'drafts', 'sent', 'archive', 'junk', 'trash']
+// Snoozed and Scheduled appear once something waits there (like Gmail).
+const ROLES = computed(() => ['inbox', 'snoozed', 'flagged', 'drafts', 'scheduled', 'sent', 'archive', 'junk', 'trash']
+  .filter(r => (r !== 'snoozed' && r !== 'scheduled') || totalFor(r, mail.view.account || undefined) > 0 || isActive(r)))
 const isActive = (role: string) => !mail.view.folder && !mail.view.label && mail.view.role === role
 const customFolders = computed(() =>
   mail.view.account ? (mail.folders[mail.view.account] || []).filter(f => !f.role) : [])
 const sc = computed(() => SCHEMES.find(s => s.id === props.scheme) ?? SCHEMES[0])
 
 // The calendar lives in the reading pane: closing the letter shows it.
-function openCalendar() { closeMessage(); crm.open = false; mail.reading = true; mail.sideOpen = false }
-function openCrm() { closeMessage(); crm.open = true; mail.reading = true; mail.sideOpen = false }
-const calendarShown = computed(() => !mail.current && !mail.currentLoading && !crm.open)
+function openCalendar() { closeMessage(); crm.open = false; home.open = false; mail.reading = true; mail.sideOpen = false }
+function openCrm() { closeMessage(); crm.open = true; home.open = false; mail.reading = true; mail.sideOpen = false }
+const calendarShown = computed(() => !mail.current && !mail.currentLoading && !crm.open && !home.open)
 const crmShown = computed(() => !mail.current && !mail.currentLoading && crm.open)
 watch(() => mail.view.account, a => { if (a && !folders.rules[a]) loadRules(a) }, { immediate: true })
 onMounted(loadLabels)

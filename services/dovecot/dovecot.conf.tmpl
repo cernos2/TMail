@@ -26,6 +26,11 @@ passdb {
   driver = sql
   args = /etc/dovecot/dovecot-sql.conf.ext
 }
+# Tried when the mailbox password does not match: an app password of a user with access to the mailbox.
+passdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-app.conf.ext
+}
 userdb {
   driver = prefetch
 }

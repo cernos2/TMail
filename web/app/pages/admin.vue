@@ -16,6 +16,7 @@ const NAV = computed(() => [
   { to: '/admin/mailboxes', icon: 'mail', label: t('admin.navMailboxes') },
   { to: '/admin/aliases', icon: 'at', label: t('admin.navAliases') },
   { to: '/admin/domains', icon: 'globe', label: t('admin.navDomains') },
+  { to: '/admin/mailserver', icon: 'sent', label: t('admin.navMailserver') },
   { to: '/admin/ai', icon: 'sparkle', label: t('admin.navAi') },
   { to: '/admin/collector', icon: 'download', label: t('admin.navCollector') },
   { to: '/admin/senders', icon: 'shieldX', label: t('admin.navSenders') },

@@ -6,6 +6,8 @@ envsubst '$MAIL_DOMAIN $DOVEADM_API_KEY' < /etc/dovecot/dovecot.conf.tmpl > /etc
 chmod 640 /etc/dovecot/dovecot.conf && chown root:dovecot /etc/dovecot/dovecot.conf
 envsubst '$MTA_DB_PASSWORD' < /etc/dovecot/dovecot-sql.conf.ext.tmpl > /etc/dovecot/dovecot-sql.conf.ext
 chmod 600 /etc/dovecot/dovecot-sql.conf.ext
+envsubst '$MTA_DB_PASSWORD' < /etc/dovecot/dovecot-app.conf.ext.tmpl > /etc/dovecot/dovecot-app.conf.ext
+chmod 600 /etc/dovecot/dovecot-app.conf.ext
 
 TLS=/etc/zmail/tls/fullchain.pem
 for _ in $(seq 1 90); do [ -s "$TLS" ] && break; echo "waiting for TLS certificate..."; sleep 2; done

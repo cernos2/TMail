@@ -4,8 +4,9 @@
 //   /?crm=42        /?label=3        /?folder=Suppliers&q=invoice
 import { watch } from 'vue'
 import type { Router, LocationQuery } from 'vue-router'
-import { mail, setView, openMessage, closeMessage, loadMessages, type Summary } from './mail'
+import { mail, setView, openMessage, closeMessage, loadMessages, startCompose, type Summary } from './mail'
 import { crm, openParty, loadCrmList } from './crm'
+import { home } from './home'
 
 type Q = Record<string, string>
 
@@ -24,6 +25,8 @@ export function stateQuery(): Q {
     q.m = `${account}/${rest.join('|')}/${uid}`
   } else if (crm.open) {
     q.crm = crm.current ? String(crm.current.id) : ''
+  } else if (home.open) {
+    q.home = ''
   }
   return q
 }
@@ -60,6 +63,19 @@ export async function applyQuery(q: LocationQuery, first = false) {
     return
   }
   if (mail.selected) closeMessage()
+  // A link "write to" (mailto:, the installed app handles them) opens a new letter.
+  const mailto = str(q.mailto)
+  if (mailto && first) {
+    const u = new URL(mailto.startsWith('mailto:') ? mailto : 'mailto:' + mailto)
+    await startCompose('new')
+    if (mail.compose) {
+      mail.compose.to = decodeURIComponent(u.pathname)
+      mail.compose.subject = u.searchParams.get('subject') || ''
+    }
+  }
+  home.open = q.home != null || str(q.view) === 'home'
+  if (str(q.view) === 'calendar') { crm.open = false; home.open = false; mail.reading = true; return }
+  if (home.open) { crm.open = false; mail.reading = true; return }
   if (q.crm != null) {
     const id = Number(str(q.crm))
     crm.open = true

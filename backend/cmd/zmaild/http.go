@@ -94,6 +94,35 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/signature-image", s.auth(s.handleSignatureImage))
 	mux.HandleFunc("POST /api/spell", s.auth(s.handleSpell))
 	mux.HandleFunc("/api/spell/dict", s.auth(s.handleSpellDict))
+	mux.HandleFunc("GET /api/home/files", s.auth(s.handleHomeFiles))
+	mux.HandleFunc("GET /api/pgp", s.auth(s.handlePGP))
+	mux.HandleFunc("GET /api/pgp/status", s.auth(s.handlePGPStatus))
+	mux.HandleFunc("GET /api/pgp/public", s.auth(s.handlePGPPublic))
+	mux.HandleFunc("POST /api/pgp/keys", s.auth(s.handlePGPKeySave))
+	mux.HandleFunc("PUT /api/pgp/keys", s.auth(s.handlePGPKeySettings))
+	mux.HandleFunc("DELETE /api/pgp/keys", s.auth(s.handlePGPKeyDelete))
+	mux.HandleFunc("POST /api/pgp/contacts", s.auth(s.handlePGPContactAdd))
+	mux.HandleFunc("DELETE /api/pgp/contacts", s.auth(s.handlePGPContactDelete))
+	mux.HandleFunc("GET /api/scheduled", s.auth(s.handleScheduledList))
+	mux.HandleFunc("POST /api/scheduled/{id}", s.auth(s.handleScheduledAction))
+	mux.HandleFunc("POST /api/messages/snooze", s.auth(s.handleSnooze))
+	mux.HandleFunc("POST /api/messages/unsnooze", s.auth(s.handleUnsnooze))
+	mux.HandleFunc("GET /api/app-passwords", s.auth(s.handleAppPasswords))
+	mux.HandleFunc("POST /api/app-passwords", s.auth(s.handleAppPasswordCreate))
+	mux.HandleFunc("DELETE /api/app-passwords/{id}", s.auth(s.handleAppPasswordDelete))
+	mux.HandleFunc("GET /api/calendars", s.auth(s.handleCalendars))
+	mux.HandleFunc("GET /api/calendars/people", s.auth(s.handleCalendarPeople))
+	mux.HandleFunc("POST /api/calendars", s.auth(s.handleCalendarCreate))
+	mux.HandleFunc("PUT /api/calendars/{id}", s.auth(s.handleCalendarUpdate))
+	mux.HandleFunc("DELETE /api/calendars/{id}", s.auth(s.handleCalendarDelete))
+	mux.HandleFunc("GET /api/crm/vcard", s.auth(s.handleCrmVCardExport))
+	mux.HandleFunc("POST /api/crm/vcard", s.auth(s.handleCrmVCardImport))
+	mux.HandleFunc("GET /ics/{file}", s.handleICSFeed)
+	// Calendars and contacts for phones and desktop programs (own Basic sign-in, dav.go).
+	mux.HandleFunc("/dav/", s.handleDAV)
+	mux.HandleFunc("/dav", s.handleDAV)
+	mux.HandleFunc("/.well-known/caldav", s.handleDAV)
+	mux.HandleFunc("/.well-known/carddav", s.handleDAV)
 	s.adminRoutes(mux)
 	s.filesRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +132,14 @@ func (s *Server) routes() http.Handler {
 	// files.<domain> serves only the file links; anything else goes to the webmail.
 	files := env("FILES_HOSTNAME", "")
 	return gzipJSON(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mail program setup and the MTA-STS policy, on any of our names.
+		if s.serveAutoSetup(w, r) {
+			return
+		}
+		if isServiceHost(r.Host) {
+			http.Redirect(w, r, "https://"+s.cfg.Hostname+"/", http.StatusFound)
+			return
+		}
 		if files != "" && strings.EqualFold(strings.Split(r.Host, ":")[0], files) &&
 			!strings.HasPrefix(r.URL.Path, "/f/") && !strings.HasPrefix(r.URL.Path, "/t/") && !strings.HasPrefix(r.URL.Path, "/i/") && !strings.HasPrefix(r.URL.Path, "/favicon") {
 			http.Redirect(w, r, "https://"+s.cfg.Hostname+"/", http.StatusFound)
@@ -219,4 +256,10 @@ func (l *rateLimiter) fail(key string) {
 			}
 		}
 	}
+}
+
+// isServiceHost: autoconfig./autodiscover./mta-sts.<domain> serve only their files.
+func isServiceHost(host string) bool {
+	h := strings.ToLower(strings.Split(host, ":")[0])
+	return strings.HasPrefix(h, "autoconfig.") || strings.HasPrefix(h, "autodiscover.") || strings.HasPrefix(h, "mta-sts.")
 }

@@ -50,9 +50,15 @@ smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
 tls_preempt_cipherlist = yes
 
 # --- TLS (client, outbound) ---
-smtp_tls_security_level = may
+# DANE: a receiving server that publishes TLSA records (DNSSEC) gets verified TLS; the others get
+# opportunistic TLS as before. DNS answers come from our validating Unbound (resolv.conf in compose).
+smtp_dns_support_level = dnssec
+smtp_tls_security_level = dane
+# MTA-STS (RFC 8461): domains that publish a policy (Gmail, Outlook, Yandex…) get verified TLS too.
+smtp_tls_policy_maps = socketmap:inet:127.0.0.1:8461:postfix
 smtp_tls_loglevel = 1
 smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+# Relay (sending through an external SMTP server) is switched on by entrypoint.sh from the admin settings.
 
 # --- Restrictions for incoming mail on port 25 ---
 smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname
@@ -66,6 +72,10 @@ smtpd_data_restrictions = reject_unauth_pipelining
 smtpd_forbid_bare_newline = yes
 smtpd_forbid_bare_newline_exclusions = $mynetworks
 smtpd_forbid_unauth_pipelining = yes
+
+# --- Sending limits per mailbox: TMAIL's policy service (sendlimit.go); if it is down, mail goes on ---
+smtpd_policy_service_default_action = DUNNO
+smtpd_policy_service_timeout = 10s
 
 # --- Rate limits against brute force and floods ---
 anvil_rate_time_unit = 60s

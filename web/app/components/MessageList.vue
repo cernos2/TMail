@@ -5,11 +5,13 @@ import { confirmDialog } from '~/composables/dialogs'
 import { labelById, LABEL_COLORS } from '~/composables/labels'
 import { newEvent } from '~/composables/calendar'
 import { prefetchRow } from '~/composables/mail'
+import { searchesEverywhere, ROLE_NAMES } from '~/composables/mail'
 import { mail, visibleMessages, visibleThreads, type Thread, hasMore, loadMessages, loadMore, openMessage, openDraft, isDraftRow, act, keyOf, accountColor, viewTitle, filtersActive, resetFilters, viewTotal, type Summary } from '~/composables/mail'
 import { notifyState, requestNotifyPermission, dismissNotifyBanner } from '~/composables/notify'
 import { shortTime, displayName, isoDay, ddmm } from '~/composables/format'
 import { ext, extColor, canPreview, openAttachment } from '~/composables/attachments'
 import { t, fmtDate } from '~/composables/i18n'
+import { snooze, snoozePresets, scheduledOf, snoozedOf, whenLabel } from '~/composables/later'
 
 const SORTS = computed(() => [
   { value: 'new', label: t('list.sortNew') }, { value: 'old', label: t('list.sortOld') },
@@ -165,8 +167,16 @@ function applyPeriod(reset = false) {
 }
 const periodLabel = computed(() => (mail.filters.since || mail.filters.until) ? `${ddmm(mail.filters.since)} – ${ddmm(mail.filters.until)}` : t('list.period'))
 
+// Search through all folders: which folder a found letter is in (Inbox goes without saying).
+function folderTag(m: Summary) {
+  const role = mail.folders[m.account]?.find(f => f.name === m.folder)?.role || ''
+  if (role === 'inbox') return ''
+  return role && ROLE_NAMES[role] ? ROLE_NAMES[role] : m.folder
+}
+const ROLE_ICONS_ROW = (m: Summary) => ({ sent: 'sent', drafts: 'drafts', archive: 'archive', scheduled: 'sendClock', snoozed: 'clock' } as Record<string, string>)[roleOfRow(m)] || 'folder'
+const roleOfRow = (m: Summary) => mail.folders[m.account]?.find(f => f.name === m.folder)?.role || ''
 function rowName(m: Summary) {
-  if (sentView.value) return t('list.toNames', { names: m.to.map(a => a.name || a.email).join(', ') || '—' })
+  if (sentView.value || (searchesEverywhere() && ['sent', 'drafts', 'scheduled'].includes(roleOfRow(m)))) return t('list.toNames', { names: m.to.map(a => a.name || a.email).join(', ') || '—' })
   return displayName(m.from)
 }
 function toggleStar(m: Summary) { act(m.flagged ? 'unflag' : 'flag', [m]) }
@@ -292,11 +302,17 @@ function onScroll(e: Event) {
                 <AppIcon :name="f.role === 'archive' ? 'archive' : f.role === 'inbox' ? 'inbox' : 'folder'" /> {{ f.role === 'archive' ? t('list.folderArchive') : f.role === 'inbox' ? t('list.folderInbox') : f.name }}</button>
             </div>
           </ToolPop>
+          <ToolPop v-if="!inTrash && roleOfView !== 'snoozed' && roleOfView !== 'scheduled' && roleOfView !== 'drafts'" v-slot="{ close }" :title="t('later.snooze')" icon="clock" :down="true">
+            <WhenPicker :title="t('later.snoozeTitle')" :presets="snoozePresets()" :ok="t('later.snooze')" @pick="d => { close(); snooze(selItems, d); checked = new Set() }" />
+          </ToolPop>
           <LabelPicker :items="selItems" />
           <button class="link bulk-clear" @click="checked = new Set()">{{ t('list.clearSelection') }}</button>
         </template>
       </div>
       <div v-show="!checked.size" class="chips">
+        <button v-if="mail.filters.q.trim() && !mail.view.label" class="chip" :class="{ on: !mail.filters.here }" :aria-pressed="!mail.filters.here"
+                :title="mail.filters.here ? t('list.searchAllTitle') : t('list.searchHereTitle')" @click="mail.filters.here = !mail.filters.here; loadMessages()">
+          <AppIcon :name="mail.filters.here ? 'folder' : 'search'" />{{ mail.filters.here ? t('list.searchHere', { folder: viewTitle }) : t('list.searchAllChip') }}</button>
         <button class="chip" :class="{ on: mail.filters.unseen }" :aria-pressed="mail.filters.unseen" @click="toggle('unseen')"><span class="chip-dot" />{{ t('list.chipUnread') }}</button>
         <button class="chip" :class="{ on: mail.filters.att }" :aria-pressed="mail.filters.att" @click="toggle('att')"><AppIcon name="clip" />{{ t('list.chipAtt') }}</button>
         <button ref="periodBtn" class="chip" :class="{ on: mail.filters.since || mail.filters.until }" aria-haspopup="dialog" @click="openPeriod">
@@ -332,7 +348,7 @@ function onScroll(e: Event) {
              tabindex="0" role="button" :aria-label="th.latest.subject" @click="openRow(th.latest)" @keydown.enter="openRow(th.latest)"
              @mouseenter="hoverRow(th.latest)" @mouseleave="hoverRow(null)">
           <span class="row-pick" @click.stop="toggleCheck(th)">
-            <AppAvatar v-if="sentView" :email="th.latest.to[0]?.email" :name="th.latest.to[0]?.name || th.latest.to[0]?.email" />
+            <AppAvatar v-if="sentView || (searchesEverywhere() && ['sent', 'drafts', 'scheduled'].includes(roleOfRow(th.latest)))" :email="th.latest.to[0]?.email" :name="th.latest.to[0]?.name || th.latest.to[0]?.email" />
             <AppAvatar v-else :email="th.latest.from.email" :name="displayName(th.latest.from)" :bimi="th.latest.dmarc === 'pass'" />
             <input type="checkbox" class="row-cb" :checked="checked.has(th.key)" :aria-label="t('list.selectRow', { subject: th.latest.subject || t('list.aLetter') })" tabindex="-1" />
           </span>
@@ -347,7 +363,8 @@ function onScroll(e: Event) {
               </button>
               <button v-if="threadFiles(th).length > 3" type="button" class="file-pill more" :title="t('list.moreFiles', { n: threadFiles(th).length - 3 })" @click.stop="openRow(th.latest)" @keydown.enter.stop>+{{ threadFiles(th).length - 3 }}</button>
             </div>
-            <div v-if="multi || th.latest.sentBy" class="tags">
+            <div v-if="multi || th.latest.sentBy || (searchesEverywhere() && folderTag(th.latest))" class="tags">
+              <span v-if="searchesEverywhere() && folderTag(th.latest)" class="tag folder-tag"><AppIcon :name="ROLE_ICONS_ROW(th.latest)" />{{ folderTag(th.latest) }}</span>
               <span v-if="multi" class="to-pill"><span class="dot" :style="{ background: accountColor(th.latest.account) }"></span>{{ th.latest.account }}</span>
               <span v-if="th.latest.sentBy" class="tag" :title="th.latest.sentBy.name">{{ t('list.sentBy', { login: th.latest.sentBy.login }) }}</span>
             </div>
@@ -358,10 +375,16 @@ function onScroll(e: Event) {
             <button class="icon-btn" :title="inTrash ? t('list.deleteForever') : t('common.delete')" :aria-label="inTrash ? t('list.deleteForever') : t('common.delete')" @click="rowAct(th, 'delete')"><AppIcon name="trash" /></button>
             <button class="icon-btn" :title="th.items.some(x => !x.seen) ? t('list.markRead') : t('list.markUnread')" :aria-label="t('list.readUnread')"
                     @click="rowAct(th, th.items.some(x => !x.seen) ? 'seen' : 'unseen')"><AppIcon :name="th.items.some(x => !x.seen) ? 'mailOpen' : 'mail'" /></button>
-            <button class="icon-btn" :title="t('list.remindTomorrow', { time: fmtDate(Date.UTC(2024, 0, 1, 9), { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }) })" :aria-label="t('list.remind')" @click="remindLater(th)"><AppIcon name="clock" /></button>
+            <ToolPop v-if="!inTrash && roleOfView !== 'snoozed' && roleOfView !== 'scheduled' && roleOfView !== 'drafts'" v-slot="{ close }" :title="t('later.snooze')" icon="clock" align="right">
+              <WhenPicker :title="t('later.snoozeTitle')" :presets="snoozePresets()" :ok="t('later.snooze')" @pick="d => { close(); snooze(th.items, d) }" />
+            </ToolPop>
+            <button class="icon-btn" :title="t('list.remindTomorrow', { time: fmtDate(Date.UTC(2024, 0, 1, 9), { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }) })" :aria-label="t('list.remind')" @click="remindLater(th)"><AppIcon name="bell" /></button>
           </div>
           <div class="row-meta">
-            <span class="row-time" :title="th.latest.date">{{ shortTime(th.latest.date) }}</span>
+            <span v-if="roleOfView === 'scheduled' && scheduledOf(th.latest)" class="row-time when-tag" :class="{ bad: scheduledOf(th.latest)?.status === 'failed' }"
+                  :title="scheduledOf(th.latest)?.error || ''"><AppIcon name="sendClock" />{{ whenLabel(scheduledOf(th.latest)!.sendAt) }}</span>
+            <span v-else-if="roleOfView === 'snoozed' && snoozedOf(th.latest)" class="row-time when-tag"><AppIcon name="clock" />{{ whenLabel(snoozedOf(th.latest)!.until) }}</span>
+            <span v-else class="row-time" :title="th.latest.date">{{ shortTime(th.latest.date) }}</span>
             <span class="row-icons">
               <AppIcon v-if="th.latest.answered" name="reply" />
               <AppIcon v-if="th.items.some(x => x.hasAttachments)" name="clip" />

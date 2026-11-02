@@ -5,12 +5,35 @@ import { mail } from '~/composables/mail'
 import { crm, loadCrmList, openParty, emptyParty, taxIdLabel, cardCountry } from '~/composables/crm'
 import { shortTime } from '~/composables/format'
 import { t } from '~/composables/i18n'
+import { toast } from '~/composables/toast'
 
 let timer: ReturnType<typeof setTimeout> | null = null
 function onSearch() { if (timer) clearTimeout(timer); timer = setTimeout(loadCrmList, 250) }
 function setKind(k: '' | 'company' | 'person') { crm.kind = k; loadCrmList() }
 function create(kind: 'company' | 'person') { crm.current = null; crm.editing = emptyParty(kind) }
 const newOpen = ref(false)
+// vCard: all counterparties to a file (phones, Outlook, Google) and contacts from such a file.
+const vcfInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+function exportVcf() {
+  const a = document.createElement('a')
+  a.href = '/api/crm/vcard'
+  a.download = ''
+  a.click()
+}
+async function importVcf(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0]
+  if (!f) return
+  importing.value = true
+  try {
+    const fd = new FormData(); fd.append('file', f)
+    const r = await fetch('/api/crm/vcard', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-ZM': '1' } })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || t('crm.vcfFailed'))
+    toast(t('crm.vcfImported', { created: j.created, updated: j.updated }) + (j.skipped ? ' ' + t('crm.vcfSkipped', { n: j.skipped }) : ''))
+    loadCrmList()
+  } catch (err: any) { toast(err.message, { kind: 'err' }) } finally { importing.value = false; if (vcfInput.value) vcfInput.value.value = '' }
+}
 onMounted(loadCrmList)
 </script>
 
@@ -25,6 +48,14 @@ onMounted(loadCrmList)
           <button class="tp-item" @click="close(); create('company')">{{ t('crm.company') }}</button>
           <button class="tp-item" @click="close(); create('person')">{{ t('crm.individual') }}</button>
         </ToolPop>
+        <ToolPop v-slot="{ close }" :title="t('crm.vcfMenu')" icon="share" :down="true" align="right">
+          <div class="move-list">
+            <button class="tp-item" @click="close(); vcfInput?.click()"><AppIcon name="upload" /> {{ t('crm.vcfImport') }}</button>
+            <button class="tp-item" @click="close(); exportVcf()"><AppIcon name="download" /> {{ t('crm.vcfExport') }}</button>
+            <button class="tp-item" @click="close(); mail.settingsTab = 'clients'"><AppIcon name="phone" /> {{ t('crm.vcfPhone') }}</button>
+          </div>
+        </ToolPop>
+        <input ref="vcfInput" type="file" accept=".vcf,text/vcard,text/x-vcard" hidden @change="importVcf" />
       </header>
       <div class="crm-search">
         <input v-model="crm.q" type="search" :placeholder="t('crm.searchPlaceholder')" :aria-label="t('crm.searchAria')" @input="onSearch" />
@@ -35,7 +66,7 @@ onMounted(loadCrmList)
         </span>
       </div>
       <div class="crm-items-wrap veil-host">
-      <LoadingVeil :show="crm.loading" :text="crm.q ? t('crm.searching') : t('crm.loadingList')" />
+      <LoadingVeil :show="crm.loading || importing" :text="importing ? t('crm.vcfImporting') : crm.q ? t('crm.searching') : t('crm.loadingList')" />
       <div class="crm-items">
         <button v-for="p in crm.list" :key="p.id" type="button" class="crm-item" :class="{ on: crm.current?.id === p.id }" @click="openParty(p.id)">
           <span class="crm-ico" :class="p.kind"><AppIcon :name="p.kind === 'company' ? 'home' : 'user'" /></span>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
+import { sendPresets } from '~/composables/later'
+import { pgpCheck, addrs, type PgpCheck } from '~/composables/pgp'
 import { mail, sendCompose, discardDraft, accountOf, switchSender, addInlineImage, addComposeFiles, cancelUpload, removeLink, attachedSize, ATTACH_LIMIT } from '~/composables/mail'
 import { fileSize } from '~/composables/format'
 import { ai, hasAI, aiName, aiReplyInto, aiWriteInto, aiImproveInto, aiPickTemplate, composeUserText, setComposeUserText, aiRun, letterInput, type AssistKind } from '~/composables/ai'
@@ -22,6 +24,24 @@ const toInput = ref<{ focus: () => void } | null>(null)
 const dragging = ref(false)
 
 // The formatting bar stays open or closed the way the user left it.
+// OpenPGP: shown once the sending mailbox has a key; encrypting needs every recipient's key.
+const pgpInfo = ref<PgpCheck | null>(null)
+let pgpTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => [c.value?.from, c.value?.to, c.value?.cc, c.value?.bcc], () => {
+  clearTimeout(pgpTimer)
+  pgpTimer = setTimeout(async () => {
+    const x = c.value
+    if (!x?.from) return
+    try {
+      const r = await pgpCheck(x.from, addrs(x.to, x.cc, x.bcc))
+      pgpInfo.value = r
+      if (x.pgpSign === undefined && r.fromKey) x.pgpSign = r.signDefault
+      if (x.pgpEncrypt && r.missing.length) x.pgpEncrypt = false
+    } catch {}
+  }, 400)
+}, { immediate: true })
+const canEncrypt = computed(() => !!pgpInfo.value?.fromKey && !pgpInfo.value.missing.length && addrs(c.value.to, c.value.cc, c.value.bcc).length > 0)
+const encryptTitle = computed(() => !pgpInfo.value?.missing.length ? t('pgp.encryptTitle') : t('pgp.encryptMissing', { list: pgpInfo.value.missing.join(', ') }))
 const fmtOpen = ref(true)
 try { fmtOpen.value = localStorage.getItem('tmail.fmtbar') !== '0' } catch {}
 function toggleFmt() { fmtOpen.value = !fmtOpen.value; try { localStorage.setItem('tmail.fmtbar', fmtOpen.value ? '1' : '0') } catch {} }
@@ -210,7 +230,12 @@ onMounted(async () => {
     <p v-if="c.error" class="err" role="alert">{{ c.error }}</p>
     <EditorToolbar v-if="fmtOpen" :ed="body" />
     <div class="foot">
-      <button class="btn primary" :disabled="c.sending" @click="sendCompose"><AppSpinner v-if="c.sending" size="sm" light /><AppIcon v-else name="sent" />{{ c.sending ? t('compose.sending') : t('common.send') }}</button>
+      <span class="send-split">
+        <button class="btn primary" :disabled="c.sending" @click="sendCompose()"><AppSpinner v-if="c.sending" size="sm" light /><AppIcon v-else name="sent" />{{ c.sending ? t('compose.sending') : t('common.send') }}</button>
+        <ToolPop v-slot="{ close }" :title="t('later.sendLater')" icon="sendClock">
+          <WhenPicker :title="t('later.sendLaterTitle')" :presets="sendPresets()" :ok="t('later.schedule')" @pick="d => { close(); sendCompose(d) }" />
+        </ToolPop>
+      </span>
       <!-- Dictation: the recognised text goes where the cursor is in the letter. -->
       <VoiceButton v-if="!ctxRecording" id="compose-body" small :label="t('voice.byVoice')" @text="txt => body?.exec('insertText', txt + ' ')" />
       <!-- A recording started from the right-click menu: stop it here. -->
@@ -263,6 +288,10 @@ onMounted(async () => {
           </div>
         </ToolPop>
         <button type="button" class="tb-btn" :title="t('compose.insertImage')" :aria-label="t('compose.insertImage')" @mousedown.prevent @click="imageInput?.click()"><AppIcon name="image" /></button>
+        <template v-if="pgpInfo?.fromKey">
+          <button type="button" class="tb-btn pgp-btn" :class="{ on: c.pgpSign }" :title="t('pgp.signTitle')" :aria-label="t('pgp.sign')" :aria-pressed="!!c.pgpSign" @mousedown.prevent @click="c.pgpSign = !c.pgpSign"><AppIcon name="signature" /></button>
+          <button type="button" class="tb-btn pgp-btn" :class="{ on: c.pgpEncrypt }" :disabled="!canEncrypt && !c.pgpEncrypt" :title="encryptTitle" :aria-label="t('pgp.encrypt')" :aria-pressed="!!c.pgpEncrypt" @mousedown.prevent @click="c.pgpEncrypt = !c.pgpEncrypt"><AppIcon :name="c.pgpEncrypt ? 'lock' : 'unlock'" /></button>
+        </template>
       </span>
       <input ref="fileInput" type="file" multiple hidden @change="addFiles(($event.target as HTMLInputElement).files)" />
       <input ref="imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="addImages(($event.target as HTMLInputElement).files)" />
