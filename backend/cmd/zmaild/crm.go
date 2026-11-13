@@ -30,13 +30,13 @@ var publicDomains = map[string]bool{"gmail.com": true, "googlemail.com": true, "
 // headers and forward markers in letters (detection data, not interface text).
 var (
 	reNoReply = regexp.MustCompile(`(?i)^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?|news(letter)?|info-?rassylka|robot|bounce)[@+.-]`)
-	reDocName = regexp.MustCompile(`(?i)реквиз|карточк|card|счет|счёт|invoice|договор|contract|инн|requisit|сч\.|спецификац|коммерческ|кп`)
+	reDocName = regexp.MustCompile(`(?i)реквиз|карточк|карт[аы][\s_-]*(предпр|партн|клиент|контраг|организ|компан|фирм|поставщ)|информационн\S*[\s_-]*карт|сведения[\s_-]*о[\s_-]*(компан|организ|предпр)|card|счет|счёт|invoice|договор|contract|инн|requisit|сч\.|спецификац|коммерческ|кп`)
 	reDocExt  = regexp.MustCompile(`(?i)\.(pdf|docx?|odt|rtf|xlsx?|ods|jpe?g|png)$`)
 	// Where the quoted or forwarded part of a letter begins: data below it is not the sender's.
 	reQuoteCut = regexp.MustCompile(`(?i)(-{3,}\s*(original message|forwarded message|исходное сообщение|пересылаемое сообщение|переадресованное сообщение)|\n\s*>|\b\d{1,2}[ .]\S+[ .]\d{4}.{0,60}(пишет|wrote)\s*:|\bОт:\s.{0,120}\b(Отправлено|Дата|Sent):|\bFrom:\s.{0,120}\b(Sent|Date):|\n[^\n]{0,120}<[^>\s]+@[^>\s]+>\s*:\s*\n|\n[^\n]{0,40}\d{4}\s*г\.[^\n]{0,40}\d{1,2}:\d{2}[^\n]{0,120}:\s*\n)`)
 	reDigits   = regexp.MustCompile(`\D`)
 	// A company card / requisites document (not an invoice or contract).
-	reCardDoc = regexp.MustCompile(`(?i)реквиз|карточк|card|requisit|анкет`)
+	reCardDoc = regexp.MustCompile(`(?i)реквиз|карточк|карт[аы][\s_-]*(предпр|партн|клиент|контраг|организ|компан|фирм|поставщ)|информационн\S*[\s_-]*карт|сведения[\s_-]*о[\s_-]*(компан|организ|предпр)|card|requisit|анкет`)
 	// A forwarded letter: whatever documents it carries belong to someone else, not the sender.
 	reFwdSubject = regexp.MustCompile(`(?i)^\s*((fwd?|fw|пересл\S*|tr)\s*:\s*)+`)
 	reFwdBody    = regexp.MustCompile(`(?i)(-{3,}\s*(forwarded message|пересылаемое сообщение|переадресованное сообщение)|начало переадресованного сообщения)`)
@@ -453,6 +453,9 @@ func (s *Server) crmProcess(ctx context.Context, c *client.Client, account, fold
 		"false if it is another organisation: a supplier or a client from a forwarded or attached invoice, contract or document, or just a company mentioned. " +
 		"An invoice names two companies: the supplier (who receives the payment) and the buyer (who pays). The bank, the account numbers and the bank code in an invoice are always the supplier's. " +
 		"Return one company and do not mix the data of two: the name, tax ID, address and bank details must belong to one and the same organisation. " +
+		"If the sender attaches a company card or requisites sheet (not forwarded) and the signature names another company, return the company of the card with all its requisites: " +
+		"the sender asks to invoice that company or works for it, and the name in the signature is often a brand or a shop; set \"sender_company\" to true then. " +
+		"The person is the one who writes and signs the letter, not a director or accountant named in a document. " +
 		"Give the company's country as an ISO 3166-1 alpha-2 code in the field \"country\" of the company. " +
 		"If the letter or an attachment holds an invoice, also give the fields \"buyer_tax_id\", \"buyer_country\" and \"buyer_name\": the tax ID, country and name of the buyer (payer) of the invoice." + where + "]\n\n"
 	in := aiInput{From: who, Subject: m.Subject, Letter: note + text, Attachments: atts.String(), Mailbox: account}

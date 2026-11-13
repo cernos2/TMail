@@ -653,7 +653,9 @@ export async function startCompose(mode: ComposeMode, opts: { modal?: boolean } 
       }
       base.subject = prefixed('Re', m.subject)
       base.inReplyTo = m.messageId
-      base.references = m.references || ''
+      // RFC 5322: a parent without References but with a single In-Reply-To passes that one on
+      // (CRM systems answer like that), so the conversation stays linked past one step.
+      base.references = m.references || (/^\s*<[^<>\s]+>\s*$/.test(m.inReplyTo || '') ? m.inReplyTo.trim() : '')
       base.replyFolder = m.folder
       base.replyUid = m.uid
       base.html = `<div data-tmail-quote=""><br><div>${escHtml(t('mail.quoteHead', { date: longDate(m.date), from: fmtAddr(m.from) }))}</div><blockquote>${textHtml(body)}</blockquote></div>`

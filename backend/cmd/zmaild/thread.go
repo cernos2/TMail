@@ -22,6 +22,13 @@ func msgIDs(h string) []string { return reMsgID.FindAllString(h, -1) }
 
 const maxThread = 100
 
+// Links followed one step per round for conversations whose letters do not name their root;
+// each round searches all folders once.
+const (
+	maxThreadRounds = 8
+	threadRoundIDs  = 20
+)
+
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Session) {
 	q := r.URL.Query()
 	uid, err := strconv.ParseUint(q.Get("uid"), 10, 32)
@@ -62,31 +69,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Sess
 			writeJSON(w, http.StatusOK, map[string]any{"messages": self})
 			return
 		}
-		// Everything whose Message-ID is one we know, or that refers to the root or to this message.
-		var terms []*imap.SearchCriteria
-		for id := range ids {
-			terms = append(terms, headerCrit("Message-ID", id))
-		}
-		terms = append(terms, headerCrit("References", root))
-		if m.MessageID != "" {
-			terms = append(terms, headerCrit("In-Reply-To", m.MessageID))
-		}
 		base := baseSubject(m.Subject)
-		crit := orAll(terms)
-		// Like Gmail: a letter belongs to the conversation when it refers to one of its letters AND
-		// has the same subject without Re:/Fwd: — the subject alone never joins, a new one splits.
-		related := func(x Summary) bool {
-			if baseSubject(x.Subject) != base {
-				return false
-			}
-			for _, id := range append([]string{x.MessageID, x.InReplyTo}, x.References...) {
-				if id != "" && (ids[id] || id == root || id == m.MessageID) {
-					return true
-				}
-			}
-			return false
-		}
-
 		folders := []string{folder}
 		for _, role := range []string{"inbox", "sent", "archive"} {
 			if f, err := s.folders.byRole(c, acc.Address, role); err == nil && f != folder {
@@ -101,52 +84,57 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Sess
 				}
 			}
 		}
-		// Searched on sessions without the full-text index: a subject like "New order received" is in
-		// 60 000 letters, the index takes ~25 s for that and the header cache ~2 s (see dialSearch).
-		// All folders at once, each on its own session.
-		hits := make([][]uint32, len(folders))
-		var wg sync.WaitGroup
-		for i, f := range folders {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if u, err := s.searchHeaders(acc.Address, f, crit); err == nil {
-					hits[i] = u
-				}
-			}()
+
+		// Round 1: everything whose Message-ID is one we know, or that refers to the root or to this
+		// message. A well-formed conversation is complete after it: every reply names the root first.
+		// Some senders (CRM systems) give only In-Reply-To and no References; their replies link one
+		// step back each, so the next rounds follow those links from the letters just found.
+		var terms []*imap.SearchCriteria
+		for id := range ids {
+			terms = append(terms, headerCrit("Message-ID", id))
 		}
-		wg.Wait()
+		terms = append(terms, headerCrit("References", root))
+		if m.MessageID != "" {
+			terms = append(terms, headerCrit("In-Reply-To", m.MessageID))
+		}
+		searched := map[string]bool{root: true, m.MessageID: true}
 		var all []Summary
-		seen := map[string]bool{}
-		for i, f := range folders {
-			uids := hits[i]
-			if len(uids) == 0 {
-				continue
-			}
-			if _, err := c.Select(f, true); err != nil {
-				continue
-			}
-			sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
-			if len(uids) > maxThread {
-				uids = uids[:maxThread]
-			}
-			found, err := fetchSummaries(c, acc.Address, f, uids)
-			if err != nil {
-				continue
-			}
-			// The same letter can be in two folders (sent to ourselves): keep the first one seen,
-			// which is the copy in the folder the conversation was opened from.
+		seen := map[string]bool{}    // letters kept, by Message-ID (the same letter in two folders: once)
+		fetched := map[string]bool{} // folder|uid already read
+		for round := 0; round < maxThreadRounds && len(terms) > 0 && len(all) < maxThread; round++ {
+			found := s.threadRound(c, acc.Address, folders, orAll(terms), fetched)
+			before := len(all)
 			for _, x := range found {
-				if !related(x) {
+				// Like Gmail: a letter belongs to the conversation when it refers to one of its letters
+				// AND has the same subject without Re:/Fwd: — the subject alone never joins, a new one splits.
+				if baseSubject(x.Subject) != base || !linked(x, ids) {
 					continue
 				}
 				k := x.MessageID
 				if k == "" {
-					k = f + "|" + strconv.Itoa(int(x.UID))
+					k = x.Folder + "|" + strconv.Itoa(int(x.UID))
 				}
 				if !seen[k] {
 					seen[k] = true
 					all = append(all, x)
+				}
+			}
+			// Everything found so far names the same root: nothing more to follow.
+			if anchored(all, root) || len(all) == before {
+				break
+			}
+			terms = nil
+			for _, x := range all[before:] {
+				for _, id := range append([]string{x.MessageID, x.InReplyTo}, x.References...) {
+					if id == "" {
+						continue
+					}
+					ids[id] = true
+					if searched[id] || len(terms) >= 3*threadRoundIDs {
+						continue
+					}
+					searched[id] = true
+					terms = append(terms, headerCrit("Message-ID", id), headerCrit("In-Reply-To", id), headerCrit("References", id))
 				}
 			}
 		}
@@ -187,5 +175,75 @@ func orAll(cs []*imap.SearchCriteria) *imap.SearchCriteria {
 	mid := len(cs) / 2
 	out := imap.NewSearchCriteria()
 	out.Or = [][2]*imap.SearchCriteria{{orAll(cs[:mid]), orAll(cs[mid:])}}
+	return out
+}
+
+// linked: the letter refers to, or is, one of the conversation's letters.
+func linked(x Summary, ids map[string]bool) bool {
+	for _, id := range append([]string{x.MessageID, x.InReplyTo}, x.References...) {
+		if id != "" && ids[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// anchored: every letter is the root or names it first in References, and the root itself is
+// the start of the conversation, not a reply to something else.
+func anchored(all []Summary, root string) bool {
+	for _, x := range all {
+		if x.MessageID == root {
+			if x.InReplyTo != "" || len(x.References) > 0 {
+				return false
+			}
+		} else if len(x.References) == 0 || x.References[0] != root {
+			return false
+		}
+	}
+	return true
+}
+
+// threadRound searches the folders (each on its own session, all at once) and reads the letters
+// not read yet.
+func (s *Server) threadRound(c *client.Client, account string, folders []string, crit *imap.SearchCriteria, fetched map[string]bool) []Summary {
+	hits := make([][]uint32, len(folders))
+	var wg sync.WaitGroup
+	for i, f := range folders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Searched on sessions without the full-text index: a subject like "New order received" is
+			// in 60 000 letters, the index takes ~25 s for that and the header cache ~2 s (see dialSearch).
+			if u, err := s.searchHeaders(account, f, crit); err == nil {
+				hits[i] = u
+			}
+		}()
+	}
+	wg.Wait()
+	var out []Summary
+	for i, f := range folders {
+		var uids []uint32
+		for _, u := range hits[i] {
+			if k := f + "|" + strconv.Itoa(int(u)); !fetched[k] {
+				fetched[k] = true
+				uids = append(uids, u)
+			}
+		}
+		if len(uids) == 0 {
+			continue
+		}
+		if _, err := c.Select(f, true); err != nil {
+			continue
+		}
+		sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
+		if len(uids) > maxThread {
+			uids = uids[:maxThread]
+		}
+		// Folder by folder in the order given: the copy in the folder the conversation was opened
+		// from comes first and is the one kept.
+		if found, err := fetchSummaries(c, account, f, uids); err == nil {
+			out = append(out, found...)
+		}
+	}
 	return out
 }
