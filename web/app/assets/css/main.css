@@ -226,7 +226,8 @@ svg.i{width:18px;height:18px;flex:none}
 .thread-more{position:relative;height:24px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;padding:0 14px}
 .thread-more::before,.thread-more::after{content:"";position:absolute;left:0;right:0;height:1px;background:var(--line)}
 .thread-more::before{top:9px}.thread-more::after{top:13px}
-.thread-more span{position:relative;z-index:1;width:34px;height:34px;margin:-5px 0;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600;color:var(--ink-2)}
+.thread-more{justify-content:center}
+.thread-more span{position:relative;z-index:1;height:28px;margin:-2px 0;padding:0 14px;border-radius:14px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600;color:var(--ink-2);white-space:nowrap}
 .thread-more:hover span{border-color:var(--accent);color:var(--accent)}
 @media (max-width:760px){.t-body{padding-left:14px}}
 .row-files{display:flex;gap:6px;margin-top:6px;min-width:0}

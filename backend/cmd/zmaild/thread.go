@@ -13,7 +13,8 @@ import (
 )
 
 // Conversations: a message plus everything that references the same first message, collected from
-// Inbox, Sent and Archive of the same mailbox (and the folder it was opened from), oldest first.
+// Inbox, Sent, Archive and the own folders of the same mailbox (and the folder it was opened from),
+// oldest first.
 
 var reMsgID = regexp.MustCompile(`<[^<>\s]+>`)
 
@@ -90,6 +91,14 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request, sess *Sess
 		for _, role := range []string{"inbox", "sent", "archive"} {
 			if f, err := s.folders.byRole(c, acc.Address, role); err == nil && f != folder {
 				folders = append(folders, f)
+			}
+		}
+		// The own folders too: auto-sorting files a reply there while the rest stays in the Inbox.
+		if all, err := listFolders(c, false); err == nil {
+			for _, f := range all {
+				if f.Role == "" && f.Name != folder {
+					folders = append(folders, f.Name)
+				}
 			}
 		}
 		// Searched on sessions without the full-text index: a subject like "New order received" is in

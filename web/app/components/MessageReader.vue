@@ -35,7 +35,11 @@ const curIdx = computed(() => {
 })
 const earlier = computed(() => curIdx.value < 0 ? [] : mail.thread.slice(0, curIdx.value))
 const later = computed(() => curIdx.value < 0 ? [] : mail.thread.slice(curIdx.value + 1))
-const folded = computed(() => !mail.threadAll && earlier.value.length > 3)
+// A long conversation folds its middle (like Gmail): the first letter, a "show N more" button and
+// the last few. Up to FOLD_FROM earlier letters are all listed.
+const FOLD_FROM = 10, FOLD_TAIL = 3
+const folded = computed(() => !mail.threadAll && earlier.value.length > FOLD_FROM)
+const foldedTail = computed(() => earlier.value.slice(-FOLD_TAIL))
 const shownEarlier = computed(() => folded.value ? [] : earlier.value)
 const isSpam = computed(() => !!m.value && (m.value.folder === folderOf('junk') || m.value.spam))
 // Antivirus: findings of the letter (X-Virus) and risky file types, most serious first.
@@ -301,9 +305,9 @@ const threadNewText = computed(() => t('reader.threadNew', { name: '\u0000' }).s
           <div v-if="earlier.length" class="thread">
             <template v-if="folded">
               <ThreadItem :m="earlier[0]" />
-              <button type="button" class="thread-more" :title="t('reader.showMore', { n: earlier.length - 2 })" @click="mail.threadAll = true">
-                <span>{{ earlier.length - 2 }}</span></button>
-              <ThreadItem :m="earlier[earlier.length - 1]" />
+              <button type="button" class="thread-more" @click="mail.threadAll = true">
+                <span>{{ t('reader.showMore', { n: earlier.length - 1 - FOLD_TAIL }) }}</span></button>
+              <ThreadItem v-for="x in foldedTail" :key="keyOf(x)" :m="x" />
             </template>
             <ThreadItem v-for="x in shownEarlier" :key="keyOf(x)" :m="x" />
           </div>
