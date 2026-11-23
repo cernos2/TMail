@@ -54,6 +54,7 @@ tls_preempt_cipherlist = yes
 # opportunistic TLS as before. DNS answers come from our validating Unbound (resolv.conf in compose).
 smtp_dns_support_level = dnssec
 smtp_tls_security_level = dane
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 # MTA-STS (RFC 8461): domains that publish a policy (Gmail, Outlook, Yandex…) get verified TLS too.
 smtp_tls_policy_maps = socketmap:inet:127.0.0.1:8461:postfix
 smtp_tls_loglevel = 1
